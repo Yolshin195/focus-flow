@@ -7,6 +7,10 @@ edition = "2021"
 dioxus = { workspace = true, features = ["router"] }
 ui = { workspace = true }
 
+[dev-dependencies]
+# tests/skeleton.rs: первый кадр `Root` через SSR — сверка с каркасом в index.html.
+dioxus = { workspace = true, features = ["router", "ssr"] }
+
 [features]
 default = ["web"]
 web = ["dioxus/web"]

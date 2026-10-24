@@ -12,4 +12,5 @@
 - **Компоненты не ходят в HTTP напрямую** — только через `FocusApi`, полученный из контекста.
 - **Стили:** `document::Stylesheet` + `asset!()`; дизайн-токены (цвета, отступы, радиусы, шрифты) — в `apps/ui/assets/tokens.css`; тёмная тема по умолчанию. Цвета сессий: работа — синий, отдых — зелёный, планирование — жёлтый, потерянное время — серый.
 - **Сейчас только desktop.** `apps/web` держим собираемым, но не полируем; `apps/mobile` исключён из workspace до появления мобильных toolchain'ов.
-- **Проверка перед коммитом:** `cargo clippy -p ui -p desktop -- -D warnings`, `cd apps/desktop && dx build`.
+- **Каркас веб-версии.** `apps/web/index.html` содержит статичную копию первого кадра (оболочка + «Фокус» до данных) и critical CSS — дословные правила из `tokens.css`/`main.css`. Поменял оболочку, экран «Фокус» или их стили — `UPDATE_SKELETON=1 cargo test -p web --test skeleton` и, если тест critical CSS упал, скопировать изменённые правила. Подробности — `apps/web/README.md`.
+- **Проверка перед коммитом:** `cargo clippy -p ui -p desktop -- -D warnings`, `cargo test -p web`, `cd apps/desktop && dx build`.

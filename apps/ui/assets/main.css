@@ -67,11 +67,13 @@ button:disabled {
 
 /* ───────── Каркас ───────── */
 
+/* Высота — по видимой части окна (`dvh`): на телефоне не прыгает, когда
+   прячется адресная строка. Минимальной ширины нет — см. «Телефон» ниже. */
 .shell {
   display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100vh;
-  min-width: 960px;
+  height: 100dvh;
 }
 
 .sidebar {
@@ -188,7 +190,9 @@ button:disabled {
   position: relative;
   min-width: 0;
   height: 100vh;
-  overflow: auto;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ───────── Кнопки ───────── */
@@ -414,6 +418,7 @@ button:disabled {
   min-height: 100%;
   padding: var(--sp-6) var(--sp-10) var(--sp-8);
   isolation: isolate;
+  overflow: hidden;
 }
 
 /* Мягкое свечение цвета сессии за кольцом. */
@@ -694,8 +699,10 @@ button:disabled {
   font-weight: 500;
   color: var(--text);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .item-field-change {
@@ -1005,9 +1012,12 @@ kbd {
 }
 
 .picker-item-title {
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .picker-empty {
@@ -1472,6 +1482,15 @@ kbd {
   color: var(--text-2);
 }
 
+/* Высокий блок — название до двух строк. */
+.block.tall .block-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .block.rest .block-title,
 .block.planning .block-title {
   color: var(--text-2);
@@ -1538,6 +1557,10 @@ kbd {
   align-items: center;
   gap: var(--sp-2);
   font-weight: 600;
+}
+
+.detail-close {
+  margin: -6px -6px -6px auto;
 }
 
 .detail-item {
@@ -1621,7 +1644,156 @@ kbd {
   }
 }
 
-/* Узкое окно (от 960 px). */
+/* Телефон (до 640 px): боковая панель становится нижними вкладками, норма
+   дня — тонкой полосой над ними; «Фокус» — циферблат по меньшей стороне
+   экрана, главная кнопка на всю ширину внизу, под большим пальцем.
+   Остальные экраны — в «Телефон: экраны» в конце файла. */
+@media (max-width: 639px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .screen {
+    grid-row: 1;
+    height: auto;
+    min-height: 0;
+  }
+
+  .sidebar {
+    grid-row: 2;
+    position: relative;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .nav {
+    flex: 3 1 0;
+    flex-direction: row;
+    gap: 0;
+    padding: 0;
+  }
+
+  .nav-bottom {
+    flex: 1 1 0;
+    margin-top: 0;
+  }
+
+  .nav-item {
+    flex: 1 1 0;
+    justify-content: center;
+    gap: 3px;
+    min-height: var(--tabbar-h);
+    padding: 6px 0 4px;
+    border-radius: 0;
+  }
+
+  .nav-item:hover,
+  .nav-item.active {
+    background: none;
+  }
+
+  .nav-item.active .icon {
+    color: var(--work);
+  }
+
+  .side-progress {
+    position: absolute;
+    top: -1px;
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 0;
+    pointer-events: none;
+  }
+
+  .side-progress-value,
+  .side-progress-of {
+    display: none;
+  }
+
+  .side-progress-bar {
+    height: 2px;
+    margin-top: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .focus {
+    padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  }
+
+  .focus::before {
+    width: 150vw;
+    height: 150vw;
+  }
+
+  .focus-top {
+    gap: var(--sp-4);
+    min-height: 0;
+  }
+
+  .norm {
+    flex: none;
+    width: 136px;
+  }
+
+  .focus-stage {
+    justify-content: flex-start;
+    padding: var(--sp-6) 0 0;
+  }
+
+  .session-label {
+    margin-bottom: var(--sp-3);
+  }
+
+  .ring {
+    width: min(76vw, 300px, 40dvh);
+    height: min(76vw, 300px, 40dvh);
+  }
+
+  .ring-digits {
+    font-size: clamp(48px, 15vw, 64px);
+  }
+
+  .focus-context {
+    min-height: 0;
+    margin-top: var(--sp-5);
+  }
+
+  .item-title {
+    font-size: var(--fs-lg);
+    -webkit-line-clamp: 3;
+  }
+
+  .focus-actions {
+    align-self: stretch;
+    margin-top: auto;
+    padding-top: var(--sp-5);
+  }
+
+  .focus-actions .btn-primary {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Сенсорный экран: подсказки клавиатуры не нужны. */
+@media (hover: none) and (pointer: coarse) {
+  .key-hint {
+    display: none;
+  }
+}
+
+/* Узкое окно (до 1100 px). */
 @media (max-width: 1100px) {
   .page {
     padding-left: var(--sp-8);
@@ -2111,4 +2283,222 @@ kbd {
 
 .import-note a:hover {
   text-decoration: underline;
+}
+
+/* ───────── Планшет и телефон: экраны ───────── */
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+}
+
+/* Касание пальцем: зона нажатия не меньше 44 px, видимые размеры прежние. */
+@media (pointer: coarse) {
+  .check {
+    position: relative;
+  }
+
+  .check::after {
+    content: "";
+    position: absolute;
+    inset: -13px;
+  }
+
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .btn-small {
+    height: 36px;
+  }
+
+  .picker-item {
+    min-height: 44px;
+  }
+}
+
+/* Планшет и узкое окно: «День» в одну колонку, итоги — 1 + 2 + 2. */
+@media (max-width: 860px) {
+  .page {
+    padding-left: var(--sp-6);
+    padding-right: var(--sp-6);
+  }
+
+  .totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .total:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .day-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail {
+    position: static;
+  }
+}
+
+/* Телефон: экраны. Диалоги и детали сессии — листом снизу, формы — подпись
+   над полем, поля ввода 16 px (меньше — Safari на iPhone увеличивает
+   страницу при фокусе). */
+@media (max-width: 639px) {
+  .page {
+    padding: var(--sp-5) var(--sp-4) var(--sp-8);
+  }
+
+  .page-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-5);
+  }
+
+  .field input,
+  .picker-search input,
+  .inline-input {
+    font-size: var(--fs-lg);
+  }
+
+  .toast {
+    left: var(--sp-3);
+    right: var(--sp-3);
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-3));
+    max-width: none;
+    transform: none;
+  }
+
+  .conn-banner {
+    flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-4);
+  }
+
+  /* Диалог → лист снизу */
+  .scrim {
+    place-items: end stretch;
+    padding: 0;
+  }
+
+  .dialog,
+  .dialog-wide {
+    width: 100%;
+    max-height: calc(100dvh - var(--sp-6));
+    overflow-y: auto;
+    padding: var(--sp-5) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+    border-bottom: 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    animation: sheet-up var(--t-med) var(--ease);
+  }
+
+  .dialog-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .dialog-actions .btn {
+    height: 48px;
+  }
+
+  .choice {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .picker-list {
+    max-height: min(340px, 50dvh);
+  }
+
+  /* Задачи */
+  .composer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .import-note {
+    grid-column: 1;
+  }
+
+  .items {
+    padding: 0 var(--sp-2) var(--sp-2) var(--sp-8);
+  }
+
+  /* День: детали сессии — лист над вкладками */
+  .timeline-scroll {
+    max-height: max(320px, calc(100dvh - 420px));
+  }
+
+  .detail-hint {
+    display: none;
+  }
+
+  .detail {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+    z-index: 15;
+  }
+
+  .detail-card {
+    padding: var(--sp-4) var(--sp-4) var(--sp-5);
+    border-bottom: 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    background: var(--surface-2);
+    box-shadow: var(--shadow-float);
+    animation: sheet-up var(--t-med) var(--ease);
+  }
+
+  /* Настройки: подпись над полем */
+  .form {
+    padding: var(--sp-1) var(--sp-4);
+  }
+
+  .form-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-2);
+  }
+
+  .form-label {
+    padding-top: 0;
+  }
+
+  .card-head,
+  .card-foot {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  .card-head {
+    flex-wrap: wrap;
+  }
+
+  .card-foot .btn {
+    flex: 1 1 auto;
+  }
+
+  .seg {
+    display: flex;
+  }
+
+  .seg-btn {
+    flex: 1;
+    height: auto;
+    min-height: 40px;
+    padding: var(--sp-1) var(--sp-2);
+  }
+
+  .plugin-state {
+    flex-wrap: wrap;
+  }
+
+  .plugin-detail {
+    max-width: 100%;
+  }
+
+  .queue-hint,
+  .queue-empty {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
 }

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use focus_api_types::chrono::{DateTime, Duration, Timelike, Utc};
 use focus_api_types::{EndReason, SessionDto, SessionId, SessionKind, TimeRange};
 
-use crate::components::{kind_class, kind_label};
+use crate::components::{kind_class, kind_label, Icon};
 use crate::fmt;
 use crate::state::{use_app, UiPreset};
 
@@ -208,6 +208,12 @@ pub fn Day() -> Element {
                             div { class: "detail-kind",
                                 span { class: "kind-dot {d.class}" }
                                 "{d.kind}"
+                                button {
+                                    class: "icon-btn detail-close",
+                                    "aria-label": "Закрыть",
+                                    onclick: move |_| pick.set(None),
+                                    {Icon::Close.render(16)}
+                                }
                             }
                             if let Some(item) = &d.item {
                                 p { class: "detail-item", "{item}" }
@@ -295,6 +301,8 @@ fn SessionBlock(
         class.push_str(" tiny");
     } else if height < 22.0 {
         class.push_str(" compact");
+    } else if height >= 48.0 {
+        class.push_str(" tall");
     }
     let title = match (s.kind, &s.task_title) {
         (SessionKind::Work, Some(t)) => t.clone(),

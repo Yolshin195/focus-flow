@@ -1,10 +1,19 @@
 [package]
 name = "focus-flow"
-description = "CLI Focus Flow: serve | ui"
+description = "CLI Focus Flow: serve | token | ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["notify"]
+# Системные уведомления сервиса (см. focus-server).
+notify = ["focus-server/notify"]
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+focus-server = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

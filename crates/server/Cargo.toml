@@ -5,4 +5,26 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["notify"]
+# Системные уведомления (`notify-rust`). Без фичи — только запись в лог
+# (headless, CI).
+notify = ["dep:notify-rust"]
+
 [dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+directories = { workspace = true }
+focus-api-rest = { workspace = true }
+focus-api-types = { workspace = true }
+focus-core = { workspace = true }
+focus-storage = { workspace = true }
+getrandom = { workspace = true }
+notify-rust = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["net"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

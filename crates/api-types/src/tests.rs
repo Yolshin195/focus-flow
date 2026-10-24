@@ -115,6 +115,7 @@ fn api_error_round_trip() {
         ApiError::PluginUnavailable("jira".into()),
         ApiError::Validation("пустое название".into()),
         ApiError::Unauthorized,
+        ApiError::Forbidden("host".into()),
         ApiError::Transport("timeout".into()),
         ApiError::Internal("db".into()),
         ApiError::Unknown,

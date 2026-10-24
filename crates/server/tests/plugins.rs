@@ -79,7 +79,7 @@ impl Plugin for Fake {
     async fn on_event(&self, event: &DomainEvent, ctx: &PluginCtx) -> anyhow::Result<()> {
         if self
             .fail
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()
         {
             anyhow::bail!("сеть недоступна");

@@ -368,7 +368,7 @@ async fn contract_scenarios_pass_on_sqlite() {
     let clock = Arc::new(ManualClock::new(t0()));
     let svc = FocusService::new(st.ports(clock.clone(), Arc::new(NoTaskSources)));
     let results = run_all_with_clock(&svc, &Clock(clock)).await;
-    assert_eq!(results.len(), 10);
+    assert_eq!(results.len(), 11);
     assert_all_passed(&results).unwrap_or_else(|e| panic!("{e}"));
     // Сервис публиковал события в outbox SQLite.
     assert!(st.stats().await.unwrap()[0].pending > 0);

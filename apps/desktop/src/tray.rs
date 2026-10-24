@@ -113,6 +113,7 @@ enum Action {
     DonePlanning,
     Interrupt,
     Rest,
+    StartRest,
     Stop,
     StartWork,
     Planning,
@@ -120,12 +121,13 @@ enum Action {
 }
 
 impl Action {
-    const ALL: [Action; 9] = [
+    const ALL: [Action; 10] = [
         Action::Open,
         Action::DoneRest,
         Action::DonePlanning,
         Action::Interrupt,
         Action::Rest,
+        Action::StartRest,
         Action::Stop,
         Action::StartWork,
         Action::Planning,
@@ -140,6 +142,7 @@ impl Action {
             Action::DonePlanning => "focus-flow-tray:done-planning",
             Action::Interrupt => "focus-flow-tray:interrupt",
             Action::Rest => "focus-flow-tray:rest",
+            Action::StartRest => "focus-flow-tray:start-rest",
             Action::Stop => "focus-flow-tray:stop",
             Action::StartWork => "focus-flow-tray:start-work",
             Action::Planning => "focus-flow-tray:planning",
@@ -159,6 +162,7 @@ impl Action {
             Action::DonePlanning => "Спланировать следующую",
             Action::Interrupt => "Прервать…",
             Action::Rest => "Отдых",
+            Action::StartRest => "Начать отдых",
             Action::Stop => "Стоп",
             Action::StartWork => "Начать работу…",
             Action::Planning => "Планировать",
@@ -172,7 +176,7 @@ impl Action {
         match self {
             Action::DoneRest => Some(Command::Done(DoneNext::Rest)),
             Action::DonePlanning => Some(Command::Done(DoneNext::Planning)),
-            Action::Rest => Some(Command::StartRest),
+            Action::Rest | Action::StartRest => Some(Command::StartRest),
             Action::Stop => Some(Command::Stop),
             Action::Planning => Some(Command::StartPlanning),
             Action::Open | Action::Interrupt | Action::StartWork | Action::Quit => None,
@@ -204,6 +208,7 @@ fn entries(indicator: Indicator) -> Vec<Entry> {
             Entry::Item(Action::StartWork),
             Entry::Item(Action::Planning),
         ],
+        Indicator::RestDue => vec![Entry::Item(Action::StartRest)],
         Indicator::Rest | Indicator::Offline => Vec::new(),
     };
     let mut out = vec![Entry::Item(Action::Open), Entry::Separator];
@@ -255,6 +260,7 @@ fn perform(action: Action, app: AppState, api: &ApiHandle) {
         Action::DoneRest
         | Action::DonePlanning
         | Action::Rest
+        | Action::StartRest
         | Action::Stop
         | Action::Planning => {
             // Пока идёт команда, кнопки экрана неактивны — трей тоже ждёт.
@@ -429,7 +435,8 @@ fn icon_png(indicator: Indicator) -> &'static [u8] {
     }
     match indicator {
         Indicator::Work => png!("work"),
-        Indicator::Rest => png!("rest"),
+        // Время вышло: та же чашка, что у отдыха, — отдых ждёт.
+        Indicator::Rest | Indicator::RestDue => png!("rest"),
         Indicator::Planning => png!("planning"),
         Indicator::Idle => png!("idle"),
         Indicator::Offline => png!("offline"),
@@ -517,6 +524,7 @@ mod tests {
         );
         assert_eq!(actions(Indicator::Idle), [Open, StartWork, Planning, Quit]);
         assert_eq!(actions(Indicator::Rest), [Open, Quit]);
+        assert_eq!(actions(Indicator::RestDue), [Open, StartRest, Quit]);
         assert_eq!(actions(Indicator::Offline), [Open, Quit]);
     }
 
@@ -576,6 +584,7 @@ mod tests {
         for ind in [
             Indicator::Work,
             Indicator::Rest,
+            Indicator::RestDue,
             Indicator::Planning,
             Indicator::Idle,
             Indicator::Offline,

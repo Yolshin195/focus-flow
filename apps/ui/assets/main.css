@@ -253,6 +253,23 @@ button:disabled {
   background: #f7c35e;
 }
 
+.btn-primary.btn-rest {
+  background: var(--rest);
+  color: var(--text-on-accent);
+}
+
+.btn-primary.btn-rest:hover:not(:disabled) {
+  background: #5fe0a2;
+}
+
+/* «Выключить сигнал» после отдыха: не главное действие, но заметное */
+.btn-quiet.alarm-off {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--rest);
+}
+
 .btn-quiet {
   color: var(--text-2);
 }

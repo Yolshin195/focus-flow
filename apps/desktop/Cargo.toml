@@ -21,6 +21,9 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Bundle id процесса — отправитель уведомлений без диалога «Where is use_default?»;
+# NSString для имени звука сигнала.
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSBundle", "NSString"] }
 # Моноширинные цифры времени в строке меню (NSStatusItem из tray-icon).
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
@@ -31,6 +34,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSFont",
     "NSFontDescriptor",
     "NSResponder",
+    "NSSound",
     "NSStatusBarButton",
     "NSStatusItem",
     "NSView",

@@ -9,7 +9,6 @@ use focus_api_rest::{Access, RestState};
 
 use crate::app::App;
 use crate::config::Config;
-use crate::notify::default_notifier;
 use crate::plugins::{OUTBOX_POLL, run_outbox_worker};
 use crate::timer::{POLL, run_timer};
 
@@ -62,12 +61,7 @@ pub async fn run_until(
     tracing::info!(addr = %listener.local_addr()?, data_dir = %app.config.data_dir.display(), "focus-flow serve запущен");
 
     let cancel = app.shutdown.clone();
-    let timer = tokio::spawn(run_timer(
-        app.clone(),
-        default_notifier(),
-        POLL,
-        cancel.clone(),
-    ));
+    let timer = tokio::spawn(run_timer(app.clone(), POLL, cancel.clone()));
 
     let outbox = tokio::spawn(run_outbox_worker(
         app.plugins.clone(),

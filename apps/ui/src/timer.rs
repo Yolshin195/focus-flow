@@ -18,6 +18,12 @@ pub enum TimerView {
     Loading,
     /// Ничего не идёт.
     Idle,
+    /// Время работы вышло, отдых ждёт «Начать отдых»; прошло с конца работы
+    /// (секунды, потерянное время).
+    RestDue {
+        /// Прошло с конца работы, с.
+        waiting: i64,
+    },
     /// Работа: осталось и всего (секунды), пункт.
     Work {
         /// Осталось, с (не меньше нуля).
@@ -49,6 +55,9 @@ impl TimerView {
         };
         let now = s.server_time;
         match &s.active {
+            None if s.rest_due => Self::RestDue {
+                waiting: s.idle_since.map_or(0, |at| (now - at).num_seconds().max(0)),
+            },
             None => Self::Idle,
             Some(ActiveSession::Work {
                 item,
@@ -82,6 +91,7 @@ impl TimerView {
                 Some(fmt::clock(*remaining))
             }
             Self::Planning { elapsed } => Some(fmt::clock(*elapsed)),
+            Self::RestDue { .. } => Some(fmt::clock(0)),
             Self::Idle | Self::Loading => None,
         }
     }
@@ -113,6 +123,8 @@ pub enum Indicator {
     Planning,
     /// Ничего не идёт.
     Idle,
+    /// Время работы вышло — ждём «Начать отдых».
+    RestDue,
     /// Нет связи с сервисом (или данных ещё нет).
     Offline,
 }
@@ -153,6 +165,10 @@ impl StatusLine {
         let (indicator, tooltip) = match view {
             TimerView::Loading => return offline("Focus Flow — подключаюсь к сервису"),
             TimerView::Idle => (Indicator::Idle, "Focus Flow — готов к работе".to_string()),
+            TimerView::RestDue { .. } => (
+                Indicator::RestDue,
+                "Время работы вышло — начни отдых".to_string(),
+            ),
             TimerView::Work { item, .. } => (
                 Indicator::Work,
                 format!(
@@ -210,6 +226,7 @@ mod tests {
             worked_today_sec: 0,
             target_sec: 8 * 3600,
             idle_since: None,
+            rest_due: false,
         }
     }
 

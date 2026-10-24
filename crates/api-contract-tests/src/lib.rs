@@ -85,6 +85,10 @@ async fn run(api: &dyn FocusApi, clock: Option<&dyn TestClock>) -> Vec<ScenarioR
             "planning_counts_in_norm",
             planning_counts_in_norm(api, clock).await,
         ),
+        (
+            "work_limit_waits_for_rest",
+            work_limit_waits_for_rest(api, clock).await,
+        ),
         // Последним: оставляет активный отдых, который нельзя пропустить.
         (
             "done_then_rest_rest_not_in_norm",

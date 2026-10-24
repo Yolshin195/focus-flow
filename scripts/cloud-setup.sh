@@ -80,16 +80,20 @@ if [ -n "$dx_version" ] && ! compgen -G "$dx_tools/esbuild-*/.for-dx-$dx_version
   fi
 fi
 
-# Системные библиотеки для desktop-сборки (wry — WebKitGTK, muda и global-hotkey — libxdo).
-if ! pkg-config --exists webkit2gtk-4.1 gtk+-3.0 2>/dev/null || [ ! -e /usr/include/xdo.h ]; then
+# Системные библиотеки для desktop: сборка (wry — WebKitGTK, muda и global-hotkey — libxdo)
+# и трей при запуске (tray-icon подгружает libayatana-appindicator3 через dlopen; без неё
+# окно работает, но без трея).
+desktop_pkgs=(libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libayatana-appindicator3-1)
+if ! pkg-config --exists webkit2gtk-4.1 gtk+-3.0 2>/dev/null || [ ! -e /usr/include/xdo.h ] ||
+  ! compgen -G "/usr/lib/*/libayatana-appindicator3.so.1" >/dev/null; then
   sudo=""
   [ "$(id -u)" -eq 0 ] || sudo="sudo"
   if $sudo apt-get update -qq >/dev/null 2>&1 &&
     $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-      libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev >/dev/null 2>&1; then
+      "${desktop_pkgs[@]}" >/dev/null 2>&1; then
     echo "cloud-setup: системные библиотеки для desktop установлены"
   else
-    warn "apt-get не смог поставить libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev — desktop не соберётся"
+    warn "apt-get не смог поставить ${desktop_pkgs[*]} — desktop не соберётся или запустится без трея"
   fi
 fi
 

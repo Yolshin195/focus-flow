@@ -94,7 +94,7 @@ claude mcp add --transport http focus-flow http://127.0.0.1:7878/mcp \
 
 - **Data Center / Server** — персональный токен (PAT): аватар → Profile → Personal Access Tokens. Запросы идут с `Authorization: Bearer`.
 - **Cloud** — API-токен (<https://id.atlassian.com/manage-profile/security/api-tokens>) и email учётной записи. Запросы идут с Basic `email:токен`.
-- **Поле чек-листа** — id поля Smart Checklist. Если оставить пустым, плагин найдёт поле сам по имени.
+- **Поле чек-листа** — id текстового поля «Checklists» из Smart Checklist. Если оставить пустым, плагин найдёт поле сам по имени. Поле «Smart Checklist» на Data Center не подходит: оно для JQL и отдаёт не текст, а список объектов.
 - **Worklog** — какие сессии списывать: работу, прерванную работу (обе по умолчанию включены), планирование (по умолчанию выключено).
 
 Что делает плагин:

@@ -55,6 +55,28 @@ pub struct Field {
     /// Название.
     #[serde(default)]
     pub name: String,
+    /// Тип значения; у некоторых системных полей схемы нет.
+    #[serde(default)]
+    pub schema: Option<FieldSchema>,
+}
+
+impl Field {
+    /// Значение поля — строка (или тип неизвестен): такое поле можно
+    /// читать и писать текстом.
+    pub fn is_text(&self) -> bool {
+        self.schema
+            .as_ref()
+            .and_then(|s| s.kind.as_deref())
+            .is_none_or(|k| k == "string")
+    }
+}
+
+/// Схема поля Jira: `{"type": "string", "custom": "…:textarea"}`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FieldSchema {
+    /// Тип значения: `string`, `array`, `number`, `any`…
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
 }
 
 /// Задача Jira: название и текст чек-листа.
@@ -168,16 +190,9 @@ impl<'a> Jira<'a> {
             )
             .await?;
         let f = v.get("fields").cloned().unwrap_or(Value::Null);
-        let checklist = match field.map(|id| f.get(id).cloned().unwrap_or(Value::Null)) {
-            None | Some(Value::Null) => String::new(),
-            Some(Value::String(s)) => s,
-            Some(other) => {
-                return Err(JiraError::Decode(format!(
-                    "поле чек-листа {} не текстовое: {}",
-                    field.unwrap_or_default(),
-                    truncate(&other.to_string(), 80)
-                )));
-            }
+        let checklist = match field {
+            Some(id) => checklist_text(id, f.get(id).cloned().unwrap_or(Value::Null))?,
+            None => String::new(),
         };
         Ok(Issue {
             key: v
@@ -243,27 +258,46 @@ pub fn jira_time(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string()
 }
 
-/// Подходящее поле чек-листа: имя «Smart Checklist», затем содержащее
-/// «smart checklist», затем «checklist» (без «progress» — служебное поле
-/// прогресса Smart Checklist).
+/// Текст чек-листа из значения поля `id`: `null` — пустой чек-лист.
+///
+/// Не строка — это не то поле: у Smart Checklist для Data Center поле
+/// «Smart Checklist» служит для JQL и отдаёт список объектов
+/// (`["Checklist(id=…, _items=[Item(…)])"]`), а текст лежит в «Checklists».
+pub fn checklist_text(id: &str, value: Value) -> Result<String, JiraError> {
+    match value {
+        Value::Null => Ok(String::new()),
+        Value::String(s) => Ok(s),
+        other => Err(JiraError::Decode(format!(
+            "поле чек-листа {id} не текстовое — нужно текстовое поле «Checklists» \
+             (укажите его id в настройках Jira или оставьте поле пустым для автопоиска): {}",
+            truncate(&other.to_string(), 80)
+        ))),
+    }
+}
+
+/// Подходящее поле чек-листа. Только текстовые поля без «progress» в имени
+/// (служебное поле прогресса Smart Checklist), по порядку: «Checklists» —
+/// текстовое поле Smart Checklist для REST API, затем «Smart Checklist»,
+/// затем содержащее «smart checklist», затем «checklist».
 pub fn pick_checklist_field(fields: &[Field]) -> Option<&Field> {
-    let low = |f: &Field| f.name.trim().to_lowercase();
-    let usable = |f: &&Field| !low(f).contains("progress");
+    let rank = |f: &Field| {
+        let name = f.name.trim().to_lowercase();
+        if !f.is_text() || name.contains("progress") {
+            return None;
+        }
+        match name.as_str() {
+            "checklists" => Some(0),
+            "smart checklist" => Some(1),
+            n if n.contains("smart checklist") => Some(2),
+            n if n.contains("checklist") => Some(3),
+            _ => None,
+        }
+    };
     fields
         .iter()
-        .find(|f| low(f) == "smart checklist")
-        .or_else(|| {
-            fields
-                .iter()
-                .filter(usable)
-                .find(|f| low(f).contains("smart checklist"))
-        })
-        .or_else(|| {
-            fields
-                .iter()
-                .filter(usable)
-                .find(|f| low(f).contains("checklist"))
-        })
+        .filter_map(|f| rank(f).map(|r| (r, f)))
+        .min_by_key(|(r, _)| *r)
+        .map(|(_, f)| f)
 }
 
 fn jira_messages(body: &[u8]) -> Option<String> {
@@ -321,19 +355,63 @@ mod tests {
         assert_eq!(b["timeSpentSeconds"], 60);
     }
 
-    #[test]
-    fn picks_field() {
-        let f = |id: &str, name: &str| Field {
+    fn field(id: &str, name: &str, kind: Option<&str>) -> Field {
+        Field {
             id: id.into(),
             name: name.into(),
-        };
+            schema: Some(FieldSchema {
+                kind: kind.map(str::to_owned),
+            }),
+        }
+    }
+
+    #[test]
+    fn picks_field() {
+        let f = |id, name| field(id, name, Some("string"));
         let all = [
             f("c1", "Smart Checklist Progress"),
             f("c2", "My Checklist"),
             f("c3", "Smart Checklist"),
+            f("c4", "Checklists"),
         ];
-        assert_eq!(pick_checklist_field(&all).unwrap().id, "c3");
+        assert_eq!(pick_checklist_field(&all).unwrap().id, "c4");
+        assert_eq!(pick_checklist_field(&all[..3]).unwrap().id, "c3");
         assert_eq!(pick_checklist_field(&all[..2]).unwrap().id, "c2");
         assert!(pick_checklist_field(&all[..1]).is_none());
+    }
+
+    #[test]
+    fn skips_non_text_fields() {
+        // Smart Checklist для Data Center: «Smart Checklist» — не текст.
+        let dc = [
+            field("customfield_11600", "Smart Checklist", Some("array")),
+            field(
+                "customfield_11601",
+                "Smart Checklist Progress",
+                Some("string"),
+            ),
+            field("customfield_11602", "Checklists", Some("string")),
+        ];
+        assert_eq!(pick_checklist_field(&dc).unwrap().id, "customfield_11602");
+        assert!(pick_checklist_field(&dc[..2]).is_none());
+        // Без схемы — тип неизвестен, поле годится.
+        let bare: Field =
+            serde_json::from_value(json!({"id": "c1", "name": "Checklists"})).unwrap();
+        assert!(bare.is_text());
+        assert_eq!(pick_checklist_field(&[bare]).unwrap().id, "c1");
+    }
+
+    #[test]
+    fn checklist_value() {
+        assert_eq!(checklist_text("c", Value::Null).unwrap(), "");
+        assert_eq!(checklist_text("c", json!("- a")).unwrap(), "- a");
+        let err = checklist_text(
+            "customfield_11600",
+            json!(["Checklist(id=184286, issueId=260721, _items=[Item(id=15355)])"]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("customfield_11600"), "{err}");
+        assert!(err.contains("«Checklists»"), "{err}");
     }
 }

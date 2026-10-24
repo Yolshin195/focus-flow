@@ -30,7 +30,10 @@ use serde_json::{Value, json};
 use sqlx::Row as _;
 
 pub use checklist::{Line, Marker};
-pub use client::{Field, Issue, Jira, JiraError, jira_time, pick_checklist_field, worklog_body};
+pub use client::{
+    Field, FieldSchema, Issue, Jira, JiraError, checklist_text, jira_time, pick_checklist_field,
+    worklog_body,
+};
 pub use settings::{Conn, JiraSettings, Mode, TOKEN_SECRET, WorklogSettings, validate_base_url};
 
 /// Id плагина.
@@ -136,7 +139,9 @@ impl JiraPlugin {
                 tracing::info!(field = %id, "найдено поле чек-листа Jira");
                 *lock(&self.inner.field) = Some((conn.base.clone(), id.clone()));
             }
-            None => tracing::warn!("в Jira нет поля Smart Checklist — задайте checklist_field_id"),
+            None => tracing::warn!(
+                "в Jira нет текстового поля чек-листа («Checklists» Smart Checklist) — задайте checklist_field_id"
+            ),
         }
         Ok(found)
     }

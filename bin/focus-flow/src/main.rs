@@ -6,6 +6,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
+
+#[cfg(feature = "ui")]
+mod ui;
 use focus_server::{Config, load_or_create_token};
 
 /// Трекер фокуса 50/10.
@@ -49,8 +52,10 @@ enum Command {
     Serve(ConfigArgs),
     /// Показать токен доступа (создаётся при первом запуске).
     Token(ConfigArgs),
-    /// Открыть desktop-клиент; при необходимости поднять сервис.
-    Ui,
+    /// Открыть desktop-клиент; если сервис не отвечает, поднять его в этом
+    /// же процессе (остановится вместе с окном).
+    #[cfg(feature = "ui")]
+    Ui(ConfigArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -66,9 +71,11 @@ fn main() -> anyhow::Result<()> {
             println!("{}", load_or_create_token(&config.token_path())?);
             Ok(())
         }
-        Command::Ui => {
-            println!("focus-flow ui: запуск клиента ещё не реализован");
-            Ok(())
+        #[cfg(feature = "ui")]
+        Command::Ui(args) => {
+            init_tracing();
+            let config = args.config()?;
+            ui::run(config)
         }
     }
 }

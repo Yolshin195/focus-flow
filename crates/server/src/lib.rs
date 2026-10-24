@@ -21,6 +21,6 @@ pub use plugins::{
     OUTBOX_POLL, PluginRegistry, Registration, builtin_plugins, plugin_enabled, plugin_enabled_or,
     run_outbox_worker,
 };
-pub use server::{router, run};
+pub use server::{router, run, run_until};
 pub use timer::{POLL, run_timer};
 pub use token::load_or_create_token;

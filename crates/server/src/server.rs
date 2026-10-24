@@ -42,6 +42,15 @@ pub fn router(app: &App) -> Router {
 /// поднять таймер и HTTP. При остановке — дождаться запросов и таймера,
 /// закрыть БД.
 pub async fn run(config: Config) -> anyhow::Result<()> {
+    run_until(config, shutdown_signal()).await
+}
+
+/// То же, что [`run`], но остановка — по завершении `stop` (например, когда
+/// закрыли окно `focus-flow ui`, где сервис живёт в том же процессе).
+pub async fn run_until(
+    config: Config,
+    stop: impl std::future::Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
     let addr = config.addr;
     if !addr.ip().is_loopback() {
         tracing::warn!(%addr, "сервис слушает не только loopback — доступ защищает только токен");
@@ -69,7 +78,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let shutdown = {
         let cancel = cancel.clone();
         async move {
-            shutdown_signal().await;
+            stop.await;
             tracing::info!("остановка…");
             cancel.cancel();
         }

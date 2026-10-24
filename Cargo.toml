@@ -20,6 +20,7 @@ dioxus = { version = "0.7.1" }
 
 # workspace
 ui = { path = "apps/ui" }
+desktop = { path = "apps/desktop" }
 focus-api-types = { path = "crates/api-types" }
 focus-api-contract-tests = { path = "crates/api-contract-tests" }
 focus-core = { path = "crates/core" }

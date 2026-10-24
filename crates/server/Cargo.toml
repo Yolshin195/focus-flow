@@ -16,12 +16,12 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
+focus-api-rest = { workspace = true }
 focus-api-types = { workspace = true }
 focus-core = { workspace = true }
 focus-storage = { workspace = true }
 getrandom = { workspace = true }
 notify-rust = { workspace = true, optional = true }
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

@@ -2172,6 +2172,23 @@ version = "0.1.0"
 [[package]]
 name = "focus-api-rest"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "focus-api-contract-tests",
+ "focus-api-types",
+ "focus-core",
+ "focus-storage",
+ "futures-util",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+]
 
 [[package]]
 name = "focus-api-types"
@@ -2229,12 +2246,12 @@ dependencies = [
  "axum",
  "chrono",
  "directories",
+ "focus-api-rest",
  "focus-api-types",
  "focus-core",
  "focus-storage",
  "getrandom 0.3.4",
  "notify-rust",
- "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",

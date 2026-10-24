@@ -8,6 +8,7 @@ use focus_api_types::ServerEvent;
 use focus_core::{Clock, FocusService, NoTaskSources, SystemClock, TaskSources};
 use focus_storage::Storage;
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
 use crate::token::load_or_create_token;
@@ -29,6 +30,8 @@ pub struct App {
     pub token: Arc<str>,
     /// Конфигурация, с которой собран сервис.
     pub config: Arc<Config>,
+    /// Остановка: таймер и потоки SSE завершаются по отмене.
+    pub shutdown: CancellationToken,
 }
 
 impl App {
@@ -64,6 +67,7 @@ impl App {
             events,
             token: token.into(),
             config: Arc::new(config),
+            shutdown: CancellationToken::new(),
         }
     }
 

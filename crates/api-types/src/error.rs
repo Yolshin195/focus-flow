@@ -45,6 +45,10 @@ pub enum ApiError {
     /// Нет или неверный токен доступа.
     #[error("нет доступа: неверный токен")]
     Unauthorized,
+    /// Запрос отклонён проверкой `Host`/`Origin` (защита от DNS rebinding и
+    /// чужих страниц в браузере); в строке — что именно не так.
+    #[error("запрос отклонён: {0}")]
+    Forbidden(String),
     /// Клиент не смог связаться с сервисом (сеть, таймаут, неразборчивый ответ).
     /// Сервис эту ошибку не возвращает — её создаёт клиентская реализация `FocusApi`.
     #[error("нет связи с сервисом: {0}")]
@@ -69,6 +73,7 @@ impl ApiError {
             Self::ItemRequired | Self::Validation(_) => 422,
             Self::ItemNotFound => 404,
             Self::Unauthorized => 401,
+            Self::Forbidden(_) => 403,
             Self::PluginUnavailable(_) => 503,
             Self::Transport(_) => 502,
             Self::Internal(_) | Self::Unknown => 500,
@@ -87,6 +92,7 @@ impl ApiError {
             Self::PluginUnavailable(_) => "plugin_unavailable",
             Self::Validation(_) => "validation",
             Self::Unauthorized => "unauthorized",
+            Self::Forbidden(_) => "forbidden",
             Self::Transport(_) => "transport",
             Self::Internal(_) => "internal",
             Self::Unknown => "unknown",

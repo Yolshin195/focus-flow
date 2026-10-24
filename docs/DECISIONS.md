@@ -130,3 +130,7 @@
 - **Уведомления не дублируются.** Сервис сам показывает системное уведомление при закрытии сессии по лимиту (работа → отдых, конец отдыха). Клиент с `HttpApi` поэтому `Platform::notify` не вызывает. Свои уведомления о переходах UI показывает только с моком.
 - **Контракт по HTTP**: `apps/ui/tests/http_contract.rs` прогоняет `run_all` на `HttpApi` против запущенного сервиса (`#[ignore]`, нужны `FOCUS_TEST_ADDR` и `FOCUS_TEST_TOKEN`). Заодно тест проверяет, что первым событием SSE приходит `status_changed`, что события сценариев доходят по SSE и что неверный токен даёт `Unauthorized`. Без сервиса выполняется тест на `Transport` для недоступного адреса. `tokio` (`rt`, `macros`, `time`) — только в dev-зависимостях `ui`.
 - **Новые зависимости `apps/*`** (перенос в `[workspace.dependencies]` — за сессией A): `ui` — `reqwest` 0.13.5 (без TLS), `serde`, `serde_json`, `futures-util`; dev — `tokio`. `desktop` — `directories` 6.
+
+## 2026-10-24 · шаг 8
+
+- **Зависимости `apps/*` — в `[workspace.dependencies]`** (`async-trait`, `futures-timer`, `reqwest`, `serde`, `serde_json`, `futures-util`, `notify-rust`, `directories`, dev `tokio`). Workspace-`reqwest` теперь без TLS (`json`, `stream`) — в таком виде его берёт `ui` (решение «UI без TLS» сохраняется: `cargo tree -p web -i rustls` пуст). `rustls` и `http2` включает у себя `focus-plugin-jira` — единственный, кто ходит наружу. В общей сборке (`focus-flow` = сервис + desktop) фичи объединяются, и desktop тоже получает rustls — безвредно.

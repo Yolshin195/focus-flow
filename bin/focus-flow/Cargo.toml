@@ -6,9 +6,11 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["notify", "jira"]
+default = ["notify", "mcp", "jira"]
 # Системные уведомления сервиса (см. focus-server).
 notify = ["focus-server/notify"]
+# MCP на /mcp.
+mcp = ["focus-server/mcp"]
 # Плагин Jira.
 jira = ["focus-server/jira"]
 

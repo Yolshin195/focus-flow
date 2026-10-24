@@ -13,8 +13,9 @@ use crate::notify::default_notifier;
 use crate::plugins::{OUTBOX_POLL, run_outbox_worker};
 use crate::timer::{POLL, run_timer};
 
-/// HTTP-роутер сервиса: REST + SSE (`/api/*`) и маршруты плагинов
-/// (`/api/plugins/<id>/…`) — за одними проверками `Host`/`Origin`/токена.
+/// HTTP-роутер сервиса: REST + SSE (`/api/*`), маршруты плагинов
+/// (`/api/plugins/<id>/…`) и MCP (`/mcp`, фича `mcp`) — за одними
+/// проверками `Host`/`Origin`/токена.
 pub fn router(app: &App) -> Router {
     let access = Arc::new(Access {
         token: app.token.to_string(),
@@ -27,14 +28,14 @@ pub fn router(app: &App) -> Router {
         access: access.clone(),
         shutdown: app.shutdown.clone(),
     });
-    let plugins = app
-        .plugins
-        .routes()
-        .layer(axum::middleware::from_fn_with_state(
-            access,
-            focus_api_rest::guard::guard,
-        ));
-    Router::new().merge(rest).merge(plugins)
+    let extra = app.plugins.routes();
+    #[cfg(feature = "mcp")]
+    let extra = extra.merge(focus_api_mcp::router(app.mcp.clone()));
+    let extra = extra.layer(axum::middleware::from_fn_with_state(
+        access,
+        focus_api_rest::guard::guard,
+    ));
+    Router::new().merge(rest).merge(extra)
 }
 
 /// Запустить сервис и работать до Ctrl+C (или SIGTERM): открыть БД и токен,

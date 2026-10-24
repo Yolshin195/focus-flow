@@ -10,6 +10,8 @@ default = ["notify"]
 # Системные уведомления (`notify-rust`). Без фичи — только запись в лог
 # (headless, CI).
 notify = ["dep:notify-rust"]
+# MCP-вход на `/mcp` (`rmcp`).
+mcp = ["dep:focus-api-mcp"]
 # Плагин Jira (шаг 7; пока крейт-заготовка).
 jira = ["dep:focus-plugin-jira"]
 
@@ -19,6 +21,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
+focus-api-mcp = { workspace = true, optional = true }
 focus-api-rest = { workspace = true }
 focus-api-types = { workspace = true }
 focus-core = { workspace = true }

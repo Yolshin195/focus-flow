@@ -75,7 +75,8 @@ fn main() -> anyhow::Result<()> {
 
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,rmcp=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 

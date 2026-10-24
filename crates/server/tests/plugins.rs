@@ -477,3 +477,73 @@ async fn bad_registrations_are_rejected() {
     .await;
     assert!(r.is_err());
 }
+
+/// MCP смонтирован в общий роутер за проверками доступа и видит
+/// инструменты включённого плагина.
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn mcp_mounted_in_service_router() {
+    struct WithTool;
+    #[async_trait]
+    impl Plugin for WithTool {
+        fn id(&self) -> &'static str {
+            "tooly"
+        }
+        async fn on_event(&self, _: &DomainEvent, _: &PluginCtx) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn mcp_tools(&self) -> Vec<focus_plugin_api::McpTool> {
+            vec![focus_plugin_api::McpTool::new(
+                "tooly_ping",
+                "проверка",
+                json!({"type": "object"}),
+                |_| async { focus_plugin_api::ToolOutput::new("pong", &json!({})) },
+            )]
+        }
+    }
+    let e = env(vec![Registration::Plugin(Arc::new(WithTool))]).await;
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    let names = |v: &Value| -> Vec<String> {
+        v["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let (code, _) = e.mcp(list.clone(), false).await;
+    assert_eq!(code, StatusCode::UNAUTHORIZED);
+    let (code, v) = e.mcp(list.clone(), true).await;
+    assert_eq!(code, StatusCode::OK, "{v}");
+    assert!(names(&v).contains(&"get_status".to_owned()));
+    assert!(!names(&v).contains(&"tooly_ping".to_owned()));
+    e.enable(&["tooly"], true).await;
+    let (_, v) = e.mcp(list, true).await;
+    assert!(names(&v).contains(&"tooly_ping".to_owned()));
+}
+
+impl Env {
+    #[cfg_attr(not(feature = "mcp"), allow(dead_code))]
+    async fn mcp(&self, body: Value, token: bool) -> (StatusCode, Value) {
+        let mut b = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header(header::HOST, "127.0.0.1:7878")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream");
+        if token {
+            b = b.header(header::AUTHORIZATION, format!("Bearer {TOKEN}"));
+        }
+        let resp = router(&self.app)
+            .oneshot(b.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
+        )
+    }
+}

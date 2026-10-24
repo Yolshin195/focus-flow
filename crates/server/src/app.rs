@@ -31,6 +31,9 @@ pub struct App {
     pub token: Arc<str>,
     /// Реестр плагинов (он же источник задач и хозяин статуса плагинов).
     pub plugins: Arc<PluginRegistry>,
+    /// Состояние MCP (лента событий для `get_status`).
+    #[cfg(feature = "mcp")]
+    pub mcp: focus_api_mcp::McpState,
     /// Конфигурация, с которой собран сервис.
     pub config: Arc<Config>,
     /// Остановка: таймер и потоки SSE завершаются по отмене.
@@ -81,14 +84,24 @@ impl App {
         ports.plugins = registry.clone();
         let service = Arc::new(FocusService::new(ports));
         registry.service_slot().set(&service);
+        let shutdown = CancellationToken::new();
+        #[cfg(feature = "mcp")]
+        let mcp = focus_api_mcp::McpState::new(
+            service.clone(),
+            events.clone(),
+            registry.clone(),
+            shutdown.clone(),
+        );
         Ok(Self {
             storage,
             service,
             events,
             token: token.into(),
             plugins: registry,
+            #[cfg(feature = "mcp")]
+            mcp,
             config: Arc::new(config),
-            shutdown: CancellationToken::new(),
+            shutdown,
         })
     }
 

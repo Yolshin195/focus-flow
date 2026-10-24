@@ -21,7 +21,7 @@
 - [x] **3. Сервис и таймер.** Крейт `server`, фоновая задача: следит за `ends_at`, закрывает сессию по лимиту, стартует отдых, шлёт системное уведомление (`notify-rust`) и событие в шину. Конфиг, data dir (`directories`), токен.
 - [x] **4. REST + SSE.** `api-rest` по таблице SPEC; Bearer-токен, проверка Host/Origin; SSE `/api/events`. Тесты через `axum::Router` + `tower::ServiceExt`. Обязательно: прогнать все сценарии `focus-api-contract-tests` против сервиса (тестовая реализация `FocusApi` поверх роутера) — все зелёные.
 - [x] **5. Плагинная система.** `plugin-api`: трейты, `DomainEvent`, `PluginCtx`; реестр плагинов; воркер outbox с повторами; `/api/plugins/status`; `/api/import` через `TaskSource`. Тестовый фейковый плагин.
-- [ ] **6. MCP.** `api-mcp` на `rmcp`, Streamable HTTP на `/mcp` в том же Axum; инструменты из SPEC + `mcp_tools()` плагинов. Проверить: `claude mcp add --transport http focus-flow http://127.0.0.1:7878/mcp --header "Authorization: Bearer <token>"`. В README — инструкция подключения.
+- [x] **6. MCP.** `api-mcp` на `rmcp`, Streamable HTTP на `/mcp` в том же Axum; инструменты из SPEC + `mcp_tools()` плагинов. Проверить: `claude mcp add --transport http focus-flow http://127.0.0.1:7878/mcp --header "Authorization: Bearer <token>"`. В README — инструкция подключения.
 - [ ] **7. Плагин Jira.** Всё из раздела SPEC «Плагин Jira»: настройки (base URL, режим DC/Cloud, токен в keyring, ID поля с автопоиском), импорт, синхронизация пунктов, worklog, сопоставление строк по тексту с перечитыванием. Тесты на `wiremock`.
 - [ ] **8. Финиш.** README: сборка, запуск, подключение Claude, настройка Jira. Скрипт/инструкция автозапуска `serve` (launchd на macOS). Прогнать всё, исправить предупреждения.
 

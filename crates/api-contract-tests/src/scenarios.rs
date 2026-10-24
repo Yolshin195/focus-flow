@@ -325,6 +325,38 @@ pub async fn planning_counts_in_norm(api: &dyn FocusApi, clock: Option<&dyn Test
     })
 }
 
+/// Лимит работы истёк: сессия закрыта ровно в `ends_at` с `limit`, отдых сам
+/// не стартует — `rest_due`, время с конца работы теряется. Только с
+/// управляемыми часами (иначе ждать 50 минут); без них — пропуск.
+pub async fn work_limit_waits_for_rest(api: &dyn FocusApi, clock: Option<&dyn TestClock>) -> Step {
+    let Some(clock) = clock else {
+        return Ok(());
+    };
+    ensure_idle(api).await?;
+    let (work_sec, _) = limits_sec(api).await?;
+    let (_, item) = task_with_item(api, "лимит → ждём отдых").await?;
+    let st = call("start_work", api.start_work(item.id).await)?;
+    let work = expect_active("после start_work", &st, SessionKind::Work)?;
+    ensure_eq("rest_due во время работы", st.rest_due, false)?;
+    clock.advance(Duration::seconds(work_sec + 120));
+    let st = call("get_status", api.get_status().await)?;
+    ensure(st.active.is_none(), || {
+        format!("после лимита сессии быть не должно: {:?}", st.active)
+    })?;
+    ensure_eq("rest_due после лимита", st.rest_due, true)?;
+    ensure_eq("idle_since — конец работы", st.idle_since, work.ends_at())?;
+    let date = st.day.as_ref().ok_or("после лимита нет дня")?.date;
+    let day = call("get_day", api.get_day(date).await)?;
+    let ended = day
+        .sessions
+        .iter()
+        .find(|s| s.id == work.session_id())
+        .ok_or("работы нет в get_day")?;
+    ensure_eq("end_reason", ended.end_reason, Some(EndReason::Limit))?;
+    ensure_eq("длительность работы", ended.duration_sec, work_sec)?;
+    Ok(())
+}
+
 /// «Готово» с `next = rest`: пункт `done`, сразу отдых длиной `rest_min`;
 /// время отдыха в норму не идёт. Оставляет активный отдых — запускать последним.
 pub async fn done_then_rest_rest_not_in_norm(

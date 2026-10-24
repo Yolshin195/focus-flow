@@ -63,6 +63,19 @@ pub fn idle_since(
     Some(last_end.map_or(day.opened_at, |e| e.max(day.opened_at)))
 }
 
+/// Отдых положен, но не начат: последняя сессия дня — работа, закрытая
+/// по лимиту. `sessions` — сессии этого дня.
+pub fn rest_due(sessions: &[Session]) -> bool {
+    sessions
+        .iter()
+        .max_by_key(|s| s.started_at)
+        .is_some_and(|s| {
+            s.kind == SessionKind::Work
+                && !s.is_active()
+                && s.end_reason == Some(focus_api_types::EndReason::Limit)
+        })
+}
+
 /// Сумма длительностей сессий вида `kind` на момент `now`.
 pub fn sum_kind(sessions: &[Session], kind: SessionKind, now: DateTime<Utc>) -> i64 {
     sessions

@@ -6,7 +6,7 @@ use focus_api_types::{DoneNext, TaskDto, TaskId};
 use crate::api::{jira_key, ApiHandle};
 use crate::components::{Dialog, Icon, ItemPicker, NormBar, Ring, RingTone, Segment};
 use crate::fmt;
-use crate::state::{run, use_api, use_app, AppState, Command};
+use crate::state::{run, use_api, use_app, Alarm, AppState, Command};
 use crate::timer::{use_timer_view, TimerView as View};
 
 /// Найти пункт и его родителя в дереве.
@@ -87,7 +87,9 @@ fn main_action(api: &ApiHandle, mut app: AppState) {
     }
     let view = View::of(app.status.peek().as_ref());
     match view {
+        View::RestDue { .. } => run(api.clone(), app, Command::StartRest, || {}),
         View::Idle => {
+            app.dismiss_alarm();
             if *app.picker_open.peek() {
                 return; // Enter в списке обрабатывает сам список.
             }
@@ -135,6 +137,7 @@ pub fn Focus() -> Element {
     let status = app.status.read().clone();
     let view = use_timer_view()();
     let busy = (app.busy)();
+    let rest_over = (app.alarm)() == Some(Alarm::RestOver);
 
     let (worked, target) = status
         .as_ref()
@@ -176,8 +179,20 @@ pub fn Focus() -> Element {
             fmt::NBSP.to_string(),
             fmt::NBSP,
         ),
+        View::RestDue { .. } => (
+            "Время вышло",
+            RingTone::Rest,
+            10,
+            1.0,
+            fmt::clock(0),
+            "пора отдохнуть",
+        ),
         View::Idle => (
-            "Готов к работе",
+            if rest_over {
+                "Отдых окончен"
+            } else {
+                "Готов к работе"
+            },
             RingTone::Idle,
             50,
             1.0,
@@ -227,7 +242,7 @@ pub fn Focus() -> Element {
         .and_then(|id| find_item(&app.tasks.read(), id));
 
     let lost_min = match (&view, status.as_ref()) {
-        (View::Idle, Some(s)) => s
+        (View::Idle | View::RestDue { .. }, Some(s)) => s
             .idle_since
             .filter(|_| {
                 app.day
@@ -253,6 +268,7 @@ pub fn Focus() -> Element {
     let api_e = api.clone();
     let api_f = api.clone();
     let api_g = api.clone();
+    let api_h = api.clone();
 
     rsx! {
         div { class: "focus focus-{tone.class()}",
@@ -305,13 +321,16 @@ pub fn Focus() -> Element {
                         View::Rest { .. } => rsx! {
                             div { class: "rest-hint", "Отдыхай. Встань, пройдись." }
                         },
+                        View::RestDue { .. } => rsx! {
+                            div { class: "rest-hint", "50 минут прошли. Отдых начнётся, когда нажмёшь." }
+                        },
                         View::Planning { .. } => rsx! {
                             div { class: "planning-hint", "Разложи задачу на пункты и выбери следующий." }
                         },
                         View::Idle => rsx! {
                             button {
                                 class: if selected.is_some() { "item-field filled" } else { "item-field" },
-                                onclick: move |_| app.picker_open.set(true),
+                                onclick: move |_| { app.dismiss_alarm(); app.picker_open.set(true); },
                                 if let Some((title, parent)) = &selected {
                                     span { class: "item-field-main",
                                         span { class: "item-field-title", "{title}" }
@@ -338,7 +357,24 @@ pub fn Focus() -> Element {
 
                 div { class: "focus-actions",
                     match &view {
+                        View::RestDue { .. } => rsx! {
+                            button {
+                                class: "btn btn-primary btn-rest",
+                                autofocus: true,
+                                disabled: busy,
+                                onclick: move |_| run(api_h.clone(), app, Command::StartRest, || {}),
+                                "Начать отдых"
+                            }
+                        },
                         View::Idle => rsx! {
+                            if rest_over {
+                                button {
+                                    class: "btn btn-quiet alarm-off",
+                                    onclick: move |_| app.dismiss_alarm(),
+                                    {Icon::Close.render(14)}
+                                    "Выключить сигнал"
+                                }
+                            }
                             button {
                                 class: "btn btn-primary btn-work",
                                 disabled: selected.is_none() || busy,
@@ -517,6 +553,7 @@ fn PickerFooter() -> Element {
 /// Подсказка к главному действию по Пробелу/Enter.
 fn key_hint(view: &View, item_chosen: bool) -> Option<&'static str> {
     match view {
+        View::RestDue { .. } => Some("начать отдых"),
         View::Idle if item_chosen => Some("начать"),
         View::Idle => Some("выбрать пункт"),
         View::Work { .. } => Some("готово"),

@@ -30,6 +30,7 @@ use ui::{
     ApiHandle, App, HttpApi, MockApi, MockJira, MockScenario, Platform, PlatformHandle, UiPreset,
 };
 
+mod alarm;
 mod tray;
 
 /// Адрес сервиса по умолчанию — как у `focus-flow serve`.
@@ -61,6 +62,22 @@ fn options() -> &'static Options {
     OPTIONS.get_or_init(Options::default)
 }
 
+/// Отправитель уведомлений на macOS — задать до первого показа. Иначе
+/// `mac-notification-sys` ищет его AppleScript'ом `get id of application
+/// "use_default"`, и macOS открывает диалог «Where is use_default?».
+/// Отправитель — свой bundle id, если запущено из `.app`, иначе Finder.
+#[cfg(target_os = "macos")]
+fn macos_sender() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let id = objc2_foundation::NSBundle::mainBundle()
+            .bundleIdentifier()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "com.apple.Finder".to_owned());
+        let _ = notify_rust::set_application(&id);
+    });
+}
+
 struct DesktopPlatform;
 
 impl Platform for DesktopPlatform {
@@ -69,14 +86,24 @@ impl Platform for DesktopPlatform {
     }
 
     fn notify(&self, title: &str, body: &str) {
-        let shown = notify_rust::Notification::new()
-            .appname("Focus Flow")
-            .summary(title)
-            .body(body)
-            .show();
-        if let Err(e) = shown {
-            eprintln!("уведомление не показано: {e}");
-        }
+        let (title, body) = (title.to_owned(), body.to_owned());
+        // Показ может блокировать (D-Bus на Linux) — не держим окно.
+        std::thread::spawn(move || {
+            #[cfg(target_os = "macos")]
+            macos_sender();
+            let shown = notify_rust::Notification::new()
+                .appname("Focus Flow")
+                .summary(&title)
+                .body(&body)
+                .show();
+            if let Err(e) = shown {
+                eprintln!("уведомление не показано: {e}");
+            }
+        });
+    }
+
+    fn alarm(&self, on: bool) {
+        alarm::set(on);
     }
 
     fn keep_awake(&self, _on: bool) {

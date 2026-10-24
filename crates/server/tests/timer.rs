@@ -1,42 +1,23 @@
 //! Фоновый таймер на БД в памяти и управляемых часах: закрывает работу по
-//! лимиту, стартует отдых, рассылает события и показывает уведомления.
+//! лимиту (отдых сам не стартует — `rest_due`), закрывает отдых и рассылает
+//! события.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration, TimeZone, Utc};
 use focus_api_types::{ActiveSession, EndReason, NewTask, ServerEvent, SessionKind};
 use focus_core::ManualClock;
-use focus_server::{App, Config, Notifier, run_timer};
+use focus_server::{App, Config, run_timer};
 use focus_storage::Storage;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-
-#[derive(Default)]
-struct Recorder(Mutex<Vec<String>>);
-
-impl Notifier for Recorder {
-    fn notify(&self, _title: &str, body: &str) {
-        self.0.lock().unwrap().push(body.to_owned());
-    }
-}
 
 async fn next_event(rx: &mut broadcast::Receiver<ServerEvent>) -> ServerEvent {
     tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
         .await
         .expect("событие не пришло за 5 с")
         .expect("шина закрыта")
-}
-
-async fn wait_for(rec: &Recorder, n: usize) -> Vec<String> {
-    for _ in 0..100 {
-        let got = rec.0.lock().unwrap().clone();
-        if got.len() >= n {
-            return got;
-        }
-        tokio::time::sleep(StdDuration::from_millis(20)).await;
-    }
-    panic!("уведомлений меньше {n}: {:?}", rec.0.lock().unwrap());
 }
 
 #[tokio::test]
@@ -61,17 +42,16 @@ async fn timer_closes_work_then_rest() {
         .unwrap();
     app.service.start_work(item.id).await.unwrap();
 
-    let rec = Arc::new(Recorder::default());
     let mut rx = app.events.subscribe();
     let cancel = CancellationToken::new();
     let timer = tokio::spawn(run_timer(
         app.clone(),
-        rec.clone(),
         StdDuration::from_millis(20),
         cancel.clone(),
     ));
 
-    // Лимит работы истёк → SessionEnded(work, limit), затем StatusChanged с отдыхом.
+    // Лимит работы истёк → SessionEnded(work, limit), затем StatusChanged:
+    // сессии нет, отдых ждёт пользователя.
     clock.advance(Duration::minutes(50));
     match next_event(&mut rx).await {
         ServerEvent::SessionEnded { session } => {
@@ -83,19 +63,15 @@ async fn timer_closes_work_then_rest() {
     }
     match next_event(&mut rx).await {
         ServerEvent::StatusChanged(s) => {
-            assert!(
-                matches!(s.active, Some(ActiveSession::Rest { .. })),
-                "{s:?}"
-            );
+            assert_eq!(s.active, None);
+            assert!(s.rest_due, "{s:?}");
         }
         other => panic!("ожидался StatusChanged, получено {other:?}"),
     }
-    assert_eq!(
-        wait_for(&rec, 1).await,
-        ["Время работы вышло — отдохни 10 минут"]
-    );
 
-    // Отдых кончился → SessionEnded(rest), StatusChanged без сессии.
+    // Пользователь начал отдых; отдых кончился → SessionEnded(rest), StatusChanged без сессии.
+    let st = app.service.start_rest().await.unwrap();
+    assert!(matches!(st.active, Some(ActiveSession::Rest { .. })));
     clock.advance(Duration::minutes(10));
     match next_event(&mut rx).await {
         ServerEvent::SessionEnded { session } => assert_eq!(session.kind, SessionKind::Rest),
@@ -105,10 +81,6 @@ async fn timer_closes_work_then_rest() {
         ServerEvent::StatusChanged(s) => assert_eq!(s.active, None),
         other => panic!("ожидался StatusChanged, получено {other:?}"),
     }
-    assert_eq!(
-        wait_for(&rec, 2).await[1],
-        "Отдых окончен — выбери следующую задачу"
-    );
 
     cancel.cancel();
     tokio::time::timeout(StdDuration::from_secs(5), timer)

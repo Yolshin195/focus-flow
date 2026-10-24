@@ -76,6 +76,9 @@ impl Plugin for Fake {
         Some(&FAKE_MIGRATOR)
     }
 
+    // `fetch_update` в Rust 1.99 переименован в `try_update`; новое имя не
+    // собирается на тулчейнах старше — оставляем старое.
+    #[allow(deprecated)]
     async fn on_event(&self, event: &DomainEvent, ctx: &PluginCtx) -> anyhow::Result<()> {
         if self
             .fail

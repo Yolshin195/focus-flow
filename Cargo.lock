@@ -1342,8 +1342,14 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "directories",
+ "focus-api-types",
+ "futures-timer",
+ "image",
  "notify-rust",
+ "objc2",
+ "objc2-app-kit",
  "ui",
+ "zbus",
 ]
 
 [[package]]

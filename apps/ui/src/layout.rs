@@ -25,6 +25,12 @@ pub fn Layout() -> Element {
         }
         _ => {}
     });
+    // Извне окна (трей) попросили «Фокус» — перейти на него.
+    use_effect(move || {
+        if (app.focus_requests)() > 0 {
+            nav.push(Route::Focus {});
+        }
+    });
     let (worked, target) = app
         .status
         .read()

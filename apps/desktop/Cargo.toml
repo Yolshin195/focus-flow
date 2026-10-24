@@ -9,6 +9,32 @@ ui = { workspace = true }
 notify-rust = { workspace = true }
 # Каталог данных сервиса — чтобы найти файл `token` (та же версия, что у сервиса).
 directories = { workspace = true }
+# Трей: команды «Готово → …» (`DoneNext`) и тик обновления.
+focus-api-types = { workspace = true }
+futures-timer = { workspace = true }
+# Иконки трея: PNG → RGBA (тот же `image`, что уже тянет dioxus-desktop).
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Есть ли у панели область значков (StatusNotifierWatcher): без неё окно при
+# закрытии не прячется. Та же версия, что у notify-rust.
+zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Моноширинные цифры времени в строке меню (NSStatusItem из tray-icon).
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "NSButton",
+    "NSControl",
+    "NSFont",
+    "NSFontDescriptor",
+    "NSResponder",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
+] }
 
 [features]
 default = ["desktop"]

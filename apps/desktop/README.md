@@ -2,6 +2,8 @@
 
 `lib.rs`: `DesktopPlatform` (уведомления через `notify-rust`), `HttpApi` (или `MockApi` в режиме демо) в контексте, окно 1180×780 (минимум 960×640); вход — `desktop::launch(Options, on_exit)`. Его вызывают `main.rs` (для `dx serve`/`dx build`) и `focus-flow ui` (окно + сервис в одном процессе).
 
+`tray.rs` — трей / строка меню: значок фазы, время рядом с ним, меню команд по фазе (см. раздел «Трей / строка меню» в корневом README). Пока трей есть, закрытие окна его только прячет. Значки — `assets/tray/` (SVG-исходники в `src/`, PNG пересобирает `assets/tray/render.sh`).
+
 ```bash
 dx serve            # разработка
 dx build            # сборка

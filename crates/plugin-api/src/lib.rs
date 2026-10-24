@@ -41,6 +41,33 @@ pub trait Plugin: Send + Sync + 'static {
         self.id()
     }
 
+    /// Сервер собрал контекст плагина (один раз, при регистрации). Плагин
+    /// может сохранить его — например, для обработчиков [`Plugin::mcp_tools`].
+    fn attach(&self, ctx: &PluginCtx) {
+        let _ = ctx;
+    }
+
+    /// Включён ли плагин, пока в его настройках нет флага `enabled`
+    /// (по умолчанию — выключен). Плагин, включённый по умолчанию, обязан
+    /// быть безвредным без настройки: не ходить в сеть и не копить ошибки.
+    fn enabled_by_default(&self) -> bool {
+        false
+    }
+
+    /// Настройки плагина (`SettingsDto.plugins[<id>]`, `Null` — их нет)
+    /// изменились или прочитаны при старте. Вызывается синхронно, чтобы
+    /// плагин мог обновить кэш (например, для [`TaskSource::matches`]).
+    fn settings_changed(&self, settings: &serde_json::Value) {
+        let _ = settings;
+    }
+
+    /// Короткая строка состояния для `/api/plugins/status` (`detail`),
+    /// например «не настроен». Без сети: вызывается на каждый запрос статуса.
+    async fn status_detail(&self, ctx: &PluginCtx) -> Option<String> {
+        let _ = ctx;
+        None
+    }
+
     /// Миграции таблиц плагина (имена таблиц — с префиксом `<id>_`), обычно
     /// `static MIGRATOR: Migrator = sqlx::migrate!("./migrations")`. Сервер
     /// применяет их при старте с отдельным журналом `_sqlx_migrations_<id>`,

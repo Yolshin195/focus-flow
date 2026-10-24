@@ -12,7 +12,7 @@ default = ["notify"]
 notify = ["dep:notify-rust"]
 # MCP-вход на `/mcp` (`rmcp`).
 mcp = ["dep:focus-api-mcp"]
-# Плагин Jira (шаг 7; пока крейт-заготовка).
+# Плагин Jira (включён по умолчанию, пока не выключен в настройках).
 jira = ["dep:focus-plugin-jira"]
 
 [dependencies]

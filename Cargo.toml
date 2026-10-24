@@ -62,3 +62,5 @@ futures-util = { version = "0.3.34", default-features = false, features = ["std"
 futures-executor = "0.3.34"
 # тесты хранилища: временные файлы БД
 tempfile = "3.27.0"
+# тесты плагина Jira: HTTP-заглушка вместо настоящей Jira
+wiremock = "0.6.5"

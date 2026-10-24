@@ -4,11 +4,13 @@
 use std::path::Path;
 use std::sync::{Arc, OnceLock, Weak};
 
+use focus_api_types::ServerEvent;
 use focus_core::FocusService;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use tokio::sync::broadcast;
 
 use crate::secrets::Secrets;
 
@@ -43,6 +45,8 @@ pub struct PluginCtx {
     pool: SqlitePool,
     secrets: Secrets,
     span: tracing::Span,
+    enabled_default: bool,
+    events: Option<broadcast::Sender<ServerEvent>>,
 }
 
 impl PluginCtx {
@@ -59,6 +63,29 @@ impl PluginCtx {
             pool,
             secrets: Secrets::new(secrets_root.join(id)),
             span: tracing::info_span!("plugin", id),
+            enabled_default: false,
+            events: None,
+        }
+    }
+
+    /// Включён ли плагин, пока в настройках нет флага `enabled`
+    /// ([`crate::Plugin::enabled_by_default`]).
+    pub fn with_enabled_default(mut self, on: bool) -> Self {
+        self.enabled_default = on;
+        self
+    }
+
+    /// Шина событий клиентов (SSE): плагин сообщает, например, что
+    /// задача изменилась (`task_changed`).
+    pub fn with_events(mut self, events: broadcast::Sender<ServerEvent>) -> Self {
+        self.events = Some(events);
+        self
+    }
+
+    /// Разослать событие клиентам; без шины или подписчиков — ничего.
+    pub fn broadcast(&self, event: ServerEvent) {
+        if let Some(tx) = &self.events {
+            let _ = tx.send(event);
         }
     }
 
@@ -120,14 +147,15 @@ impl PluginSettings {
         }
     }
 
-    /// Включён ли плагин (`enabled: true` в его настройках).
+    /// Включён ли плагин: флаг `enabled` в его настройках, а без флага —
+    /// [`crate::Plugin::enabled_by_default`].
     pub async fn enabled(&self) -> anyhow::Result<bool> {
         Ok(self
             .get()
             .await?
             .get("enabled")
             .and_then(Value::as_bool)
-            .unwrap_or(false))
+            .unwrap_or(self.ctx.enabled_default))
     }
 
     /// Заменить настройки плагина целиком (остальные настройки сервиса не

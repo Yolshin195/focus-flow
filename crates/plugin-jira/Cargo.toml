@@ -6,3 +6,25 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+focus-api-types = { workspace = true }
+focus-core = { workspace = true }
+focus-plugin-api = { workspace = true }
+reqwest = { workspace = true, features = ["query"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+focus-server = { workspace = true }
+focus-storage = { workspace = true }
+http-body-util = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+wiremock = { workspace = true }

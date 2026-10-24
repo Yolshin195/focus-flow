@@ -59,12 +59,10 @@ impl Registration {
 
 /// Плагины, собранные в этот бинарник (cargo features).
 pub fn builtin_plugins() -> Vec<Registration> {
-    #[allow(unused_mut)]
-    let mut out: Vec<Registration> = Vec::new();
-    // Плагин Jira подключается здесь на шаге 7:
-    // #[cfg(feature = "jira")]
-    // out.push(Registration::Source(Arc::new(focus_plugin_jira::JiraPlugin::new())));
-    out
+    vec![
+        #[cfg(feature = "jira")]
+        Registration::Source(Arc::new(focus_plugin_jira::JiraPlugin::new())),
+    ]
 }
 
 /// Итог последней доставки (в памяти процесса).
@@ -120,8 +118,12 @@ impl PluginRegistry {
                 Registration::Source(s) => Some(s),
                 Registration::Plugin(_) => None,
             };
+            let ctx = PluginCtx::new(id, service.clone(), storage.pool().clone(), secrets_root)
+                .with_enabled_default(plugin.enabled_by_default())
+                .with_events(events.clone());
+            plugin.attach(&ctx);
             entries.push(Entry {
-                ctx: PluginCtx::new(id, service.clone(), storage.pool().clone(), secrets_root),
+                ctx,
                 plugin,
                 source,
                 health: Mutex::default(),
@@ -175,11 +177,19 @@ impl PluginRegistry {
     }
 
     async fn apply_settings(&self, settings: &Settings) -> CoreResult<()> {
+        for e in &self.entries {
+            let v = settings
+                .plugins
+                .get(e.plugin.id())
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            e.plugin.settings_changed(&v);
+        }
         let enabled: BTreeSet<&'static str> = self
             .entries
             .iter()
+            .filter(|e| plugin_enabled_or(settings, e.plugin.id(), e.plugin.enabled_by_default()))
             .map(|e| e.plugin.id())
-            .filter(|id| plugin_enabled(settings, id))
             .collect();
         let ids: Vec<String> = enabled.iter().map(|s| (*s).to_owned()).collect();
         let changed = {
@@ -295,14 +305,21 @@ async fn deliver(entry: &Entry, e: &OutboxEntry) -> anyhow::Result<()> {
     }
 }
 
-/// Включён ли плагин в настройках: `plugins[<id>].enabled == true`.
+/// Включён ли плагин в настройках: `plugins[<id>].enabled == true`
+/// (без флага — выключен).
 pub fn plugin_enabled(settings: &Settings, id: &str) -> bool {
+    plugin_enabled_or(settings, id, false)
+}
+
+/// Как [`plugin_enabled`], но без флага `enabled` — `default`
+/// ([`Plugin::enabled_by_default`]).
+pub fn plugin_enabled_or(settings: &Settings, id: &str, default: bool) -> bool {
     settings
         .plugins
         .get(id)
         .and_then(|v| v.get("enabled"))
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or(default)
 }
 
 async fn run_migrations(storage: &Storage, id: &str, m: &Migrator) -> anyhow::Result<()> {
@@ -325,18 +342,20 @@ impl PluginHost for PluginRegistry {
             .into_iter()
             .map(|s| (s.plugin_id.clone(), s))
             .collect();
-        Ok(self
-            .entries
-            .iter()
-            .map(|e| {
+        let mut out = Vec::with_capacity(self.entries.len());
+        for e in &self.entries {
+            let detail = e.plugin.status_detail(&e.ctx).await;
+            out.push({
                 let id = e.plugin.id();
                 let h = lock(&e.health).clone();
                 let st = stats.get(id);
                 // Ошибка в очереди переживает перезапуск; ошибка в памяти —
                 // последняя с запуска (запись могла уже пройти повтором).
+                // Без ошибок — состояние от плагина («не настроен»), без времени.
                 let (last_error, last_error_at) = match st.and_then(|s| s.last_error.clone()) {
                     Some(err) => (Some(err), st.and_then(|s| s.last_error_at)),
-                    None => (h.last_error.clone(), h.last_error_at),
+                    None if h.last_error.is_some() => (h.last_error.clone(), h.last_error_at),
+                    None => (detail, None),
                 };
                 let queued_error = st.is_some_and(|s| s.last_error.is_some());
                 PluginStatusDto {
@@ -347,8 +366,9 @@ impl PluginHost for PluginRegistry {
                     last_error,
                     last_error_at,
                 }
-            })
-            .collect())
+            });
+        }
+        Ok(out)
     }
 
     async fn settings_changed(&self, settings: &Settings) -> CoreResult<()> {

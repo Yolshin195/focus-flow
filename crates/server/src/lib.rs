@@ -18,7 +18,8 @@ pub use app::App;
 pub use config::{Config, DEFAULT_ADDR};
 pub use notify::{LogNotifier, Notifier, default_notifier, notification_for};
 pub use plugins::{
-    OUTBOX_POLL, PluginRegistry, Registration, builtin_plugins, plugin_enabled, run_outbox_worker,
+    OUTBOX_POLL, PluginRegistry, Registration, builtin_plugins, plugin_enabled, plugin_enabled_or,
+    run_outbox_worker,
 };
 pub use server::{router, run};
 pub use timer::{POLL, run_timer};

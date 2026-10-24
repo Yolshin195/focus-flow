@@ -1,56 +1,37 @@
+//! Focus Flow в браузере (заготовка): `MockApi` и платформа без уведомлений.
+
 use dioxus::prelude::*;
-
-use ui::Navbar;
-use views::{Blog, Home};
-
-mod views;
-
-#[derive(Debug, Clone, Routable, PartialEq)]
-#[rustfmt::skip]
-enum Route {
-    #[layout(WebNavbar)]
-    #[route("/")]
-    Home {},
-    #[route("/blog/:id")]
-    Blog { id: i32 },
-}
+use ui::{ApiHandle, App, MockApi, MockScenario, Platform, PlatformHandle, UiPreset};
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("/assets/main.css");
+
+struct WebPlatform;
+
+impl Platform for WebPlatform {
+    fn name(&self) -> &'static str {
+        "web"
+    }
+    fn notify(&self, _title: &str, _body: &str) {
+        // TODO: Notification API браузера.
+    }
+    fn keep_awake(&self, _on: bool) {
+        // TODO: Screen Wake Lock API.
+    }
+    fn api_base_url(&self) -> String {
+        "http://127.0.0.1:7878".into()
+    }
+}
+
+#[component]
+fn Root() -> Element {
+    use_context_provider(|| PlatformHandle::new(WebPlatform));
+    use_context_provider(|| ApiHandle::new(MockApi::demo(MockScenario::Idle, 1.0)));
+    rsx! {
+        document::Link { rel: "icon", href: FAVICON }
+        App { preset: UiPreset::None }
+    }
+}
 
 fn main() {
-    dioxus::launch(App);
-}
-
-#[component]
-fn App() -> Element {
-    // Build cool things ✌️
-
-    rsx! {
-        // Global app resources
-        document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-
-        Router::<Route> {}
-    }
-}
-
-/// A web-specific Router around the shared `Navbar` component
-/// which allows us to use the web-specific `Route` enum.
-#[component]
-fn WebNavbar() -> Element {
-    rsx! {
-        Navbar {
-            Link {
-                to: Route::Home {},
-                "Home"
-            }
-            Link {
-                to: Route::Blog { id: 1 },
-                "Blog"
-            }
-        }
-
-        Outlet::<Route> {}
-    }
+    dioxus::launch(Root);
 }

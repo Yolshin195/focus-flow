@@ -4,5 +4,23 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dioxus = { workspace = true }
+dioxus = { workspace = true, features = ["router"] }
+focus-api-types = { workspace = true }
+# Нужен для `impl FocusApi` (трейт объявлен через `#[async_trait(?Send)]`).
+async-trait = "0.1.89"
+# Таймер для опроса статуса: один и тот же код на desktop и в wasm.
+futures-timer = "3.0.3"
+# HttpApi: REST и поток SSE. Без TLS: сервис локальный (http://127.0.0.1);
+# на wasm reqwest ходит через fetch. Workspace-версия тянет rustls/aws-lc.
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "stream"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+futures-util = { version = "0.3.31", default-features = false, features = ["std", "async-await-macro"] }
 
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+futures-timer = { version = "3.0.3", features = ["wasm-bindgen"] }
+
+[dev-dependencies]
+focus-api-contract-tests = { workspace = true }
+# Исполнитель для теста `HttpApi` на настоящем сервисе (только в тестах).
+tokio = { version = "1.48.0", features = ["rt", "macros", "time"] }

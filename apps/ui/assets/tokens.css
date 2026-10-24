@@ -1,0 +1,87 @@
+/* Дизайн-токены Focus Flow — «тихий инструмент».
+   Графитовый фон, три слоя возвышения, один акцент на экран — цвет текущей сессии. */
+
+:root {
+  color-scheme: dark;
+
+  /* Поверхности: фон → панель → карточка → поднятое */
+  --bg: #0f1115;
+  --bg-sidebar: #0c0e11;
+  --surface-1: #15181d;
+  --surface-2: #1b1f25;
+  --surface-3: #232831;
+  --scrim: rgba(6, 7, 9, 0.72);
+
+  /* Линии */
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.11);
+
+  /* Текст */
+  --text: #e9ebef;
+  --text-2: #a3a9b4;
+  --text-3: #6c7380;
+  --text-on-accent: #0b0d10;
+
+  /* Сессии — одни и те же везде */
+  --work: #5b8cff;
+  --work-soft: rgba(91, 140, 255, 0.14);
+  --work-glow: rgba(91, 140, 255, 0.10);
+  --rest: #3dd68c;
+  --rest-soft: rgba(61, 214, 140, 0.14);
+  --rest-glow: rgba(61, 214, 140, 0.08);
+  --planning: #f5b841;
+  --planning-soft: rgba(245, 184, 65, 0.14);
+  --planning-glow: rgba(245, 184, 65, 0.07);
+  /* Непрозрачные заливки блоков шкалы дня */
+  --work-block: #1a2335;
+  --rest-block: #14271f;
+  --planning-block: #2a2417;
+  --interrupted-block: #2d1c20;
+  --lost: #5b616c;
+  --lost-soft: rgba(91, 97, 108, 0.22);
+  --interrupted: #d9686e;
+  --interrupted-soft: rgba(217, 104, 110, 0.14);
+
+  /* Шрифты */
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Шкала размеров (≈ 1.2) */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --fs-timer: 76px;
+
+  /* Отступы: шаг 4 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* Радиусы: по иерархии */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* Тени — только у плавающего */
+  --shadow-float: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  /* Движение */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --t-fast: 120ms;
+  --t-med: 240ms;
+  --t-slow: 900ms;
+
+  --sidebar-w: 76px;
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(233, 235, 239, 0.55);
+}

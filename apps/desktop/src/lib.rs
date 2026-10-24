@@ -16,6 +16,9 @@
 //! - `FOCUS_MOCK_JIRA=off` — в моке Jira не настроена (по умолчанию «подключена»);
 //! - `FOCUS_MOCK_SPEED` — во сколько раз время мока быстрее реального (по умолчанию 1);
 //! - `FOCUS_WINDOW_SIZE` — размер окна `ШxВ` (по умолчанию `1180x780`).
+//!
+//! Трей / строка меню — [`tray`]: время текущей фазы рядом с иконкой и
+//! команды по фазе. Пока трей есть, закрытие окна его только прячет.
 
 use dioxus::desktop::tao::event::Event;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
@@ -26,6 +29,8 @@ use std::sync::OnceLock;
 use ui::{
     ApiHandle, App, HttpApi, MockApi, MockJira, MockScenario, Platform, PlatformHandle, UiPreset,
 };
+
+mod tray;
 
 /// Адрес сервиса по умолчанию — как у `focus-flow serve`.
 const DEFAULT_ADDR: &str = "127.0.0.1:7878";
@@ -139,8 +144,21 @@ fn read_token() -> Option<String> {
     }
 }
 
+/// Применять правки DOM сразу, а не в `requestAnimationFrame`. Dioxus ждёт
+/// от страницы подтверждения каждой пачки правок и до него не крутит задачи,
+/// а у скрытого или свёрнутого окна rAF не вызывается — вставало бы всё:
+/// SSE, ход таймера, трей. Так Dioxus сам работает с окнами, созданными
+/// невидимыми (`headless`).
+fn apply_edits_when_hidden() {
+    let script = "window.interpreter.headless = true;";
+    if let Err(e) = dioxus::desktop::window().webview.evaluate_script(script) {
+        eprintln!("не удалось включить правки без rAF: {e}");
+    }
+}
+
 #[component]
 fn Root() -> Element {
+    use_hook(apply_edits_when_hidden);
     use_context_provider(|| PlatformHandle::new(DesktopPlatform));
     use_context_provider(|| {
         if !mock_mode() {
@@ -159,7 +177,11 @@ fn Root() -> Element {
         ApiHandle::new(MockApi::demo(MockScenario::parse(&scenario()), speed)).with_jira(jira)
     });
     let preset = UiPreset::parse(&scenario());
-    rsx! { App { preset } }
+    rsx! {
+        App { preset,
+            tray::Tray {}
+        }
+    }
 }
 
 /// Размер окна из `FOCUS_WINDOW_SIZE` (`960x640`) или по умолчанию.
@@ -195,10 +217,11 @@ pub fn prepare_env() {
     }
 }
 
-/// Открыть окно и крутить цикл событий до его закрытия. `on_exit`
-/// вызывается один раз, когда цикл событий завершается (закрыли окно,
-/// Ctrl+C, SIGTERM), — до выхода из процесса: здесь `focus-flow ui`
-/// останавливает свой сервис. Сама функция не возвращается.
+/// Открыть окно и крутить цикл событий до выхода. `on_exit` вызывается
+/// один раз, когда цикл событий завершается («Выход» в трее, ⌘Q, Ctrl+C,
+/// SIGTERM; без трея — и закрытие окна), — до выхода из процесса: здесь
+/// `focus-flow ui` останавливает свой сервис. С треем закрытие окна его
+/// только прячет. Сама функция не возвращается.
 pub fn launch(opts: Options, on_exit: impl FnOnce() + 'static) {
     // Повторная установка невозможна (окно одно на процесс) — игнорируем.
     let _ = OPTIONS.set(opts);
@@ -219,6 +242,8 @@ pub fn launch(opts: Options, on_exit: impl FnOnce() + 'static) {
     #[cfg(not(target_os = "macos"))]
     let cfg = cfg.with_menu(None);
     let cfg = cfg
+        // Левый клик по трею обрабатывает `tray` (окно + экран «Фокус»).
+        .with_tray_icon_show_window_on_click(false)
         .with_background_color((r, g, b, 255))
         .with_custom_head(head)
         .with_custom_event_handler(move |ev, _| {

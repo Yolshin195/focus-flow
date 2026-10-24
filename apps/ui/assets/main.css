@@ -1964,6 +1964,122 @@ kbd {
   font-size: var(--fs-xs);
 }
 
+/* Очередь отправки в Jira */
+.queue-card {
+  margin-top: var(--sp-4);
+}
+
+.queue-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--planning-soft);
+  color: var(--planning);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.queue-hint,
+.queue-empty {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-5) 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.queue-empty {
+  padding-bottom: var(--sp-5);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.queue-list {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  list-style: none;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-2);
+  border-radius: var(--r-md);
+}
+
+.queue-row + .queue-row {
+  border-top: 1px solid var(--line);
+}
+
+.queue-row:hover {
+  background: var(--surface-2);
+}
+
+.queue-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.queue-kind.add { color: var(--work); }
+.queue-kind.done { color: var(--rest); }
+.queue-kind.worklog { color: var(--planning); }
+
+.queue-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.queue-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.queue-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.queue-err {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--interrupted);
+  font-size: var(--fs-xs);
+}
+
+.queue-row .icon-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .queue-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .queue-kind {
+    grid-column: 1 / -1;
+  }
+}
+
 .settings-alert {
   margin-bottom: var(--sp-4);
   padding: var(--sp-3) var(--sp-4);

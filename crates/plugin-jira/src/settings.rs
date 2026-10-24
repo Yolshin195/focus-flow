@@ -60,6 +60,8 @@ pub struct JiraSettings {
     pub checklist_field_id: Option<String>,
     /// Правила worklog.
     pub worklog: WorklogSettings,
+    /// Отправлять очередь в Jira сразу; по умолчанию — только кнопкой «Отправить».
+    pub auto_send: bool,
 }
 
 impl JiraSettings {
@@ -160,6 +162,7 @@ mod tests {
         let s = JiraSettings::from_value(&Value::Null).unwrap();
         assert_eq!(s.mode, Mode::DataCenter);
         assert!(s.worklog.work && s.worklog.interrupted && !s.worklog.planning);
+        assert!(!s.auto_send);
         assert_eq!(s.conn(Some("t".into())).unwrap_err(), "не задан base_url");
 
         let s = JiraSettings::from_value(&json!({

@@ -21,7 +21,7 @@ use reqwest::{Method, RequestBuilder, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use super::jira::{JiraPatch, JiraSettingsApi, JiraState, JiraTestResult};
+use super::jira::{JiraPatch, JiraQueue, JiraSettingsApi, JiraState, JiraTestResult};
 
 /// Таймаут обычного запроса. Сервис локальный — дольше ждать незачем.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -107,6 +107,10 @@ impl HttpApi {
 
     pub(crate) async fn post<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         self.send(self.request(Method::POST, path)).await
+    }
+
+    pub(crate) async fn delete<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
+        self.send(self.request(Method::DELETE, path)).await
     }
 
     async fn post_json<B: Serialize, T: DeserializeOwned>(
@@ -246,6 +250,15 @@ impl JiraSettingsApi for HttpApi {
     }
     async fn test_jira(&self) -> ApiResult<JiraTestResult> {
         self.post("/api/plugins/jira/test").await
+    }
+    async fn jira_queue(&self) -> ApiResult<JiraQueue> {
+        self.get("/api/plugins/jira/queue").await
+    }
+    async fn send_jira_queue(&self) -> ApiResult<JiraQueue> {
+        self.post("/api/plugins/jira/queue/send").await
+    }
+    async fn drop_jira_op(&self, id: i64) -> ApiResult<JiraQueue> {
+        self.delete(&format!("/api/plugins/jira/queue/{id}")).await
     }
 }
 

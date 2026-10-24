@@ -2,12 +2,15 @@
 //! - `GET /settings` — настройки и состояние; токен не возвращается, только `has_token`;
 //! - `PUT /settings` — частичная правка: переданные поля заменяются, `null`
 //!   очищает; `token` (только запись) кладётся в секреты, `""` — удаляет его;
-//! - `POST /test` — проверить подключение: `GET /rest/api/2/myself`.
+//! - `POST /test` — проверить подключение: `GET /rest/api/2/myself`;
+//! - `GET /queue` — очередь отправки: `{auto_send, items: [Op]}`;
+//! - `POST /queue/send` — отправить её сейчас: то же + `sent`, `error`;
+//! - `DELETE /queue/{id}` — не отправлять запись (повтор события её не вернёт).
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use focus_api_types::ApiError;
 use focus_plugin_api::PluginCtx;
@@ -15,6 +18,7 @@ use serde_json::{Map, Value, json};
 
 use crate::JiraPlugin;
 use crate::client::Jira;
+use crate::queue;
 use crate::settings::{JiraSettings, TOKEN_SECRET, validate_base_url};
 
 type St = (JiraPlugin, PluginCtx);
@@ -42,6 +46,9 @@ pub(crate) fn router(plugin: JiraPlugin, ctx: PluginCtx) -> Router {
     Router::new()
         .route("/settings", get(get_settings).put(put_settings))
         .route("/test", post(test))
+        .route("/queue", get(get_queue))
+        .route("/queue/send", post(send_queue))
+        .route("/queue/{id}", delete(drop_queued))
         .with_state((plugin, ctx))
 }
 
@@ -50,7 +57,7 @@ async fn get_settings(State((p, ctx)): State<St>) -> Res {
 }
 
 const STRING_KEYS: [&str; 3] = ["base_url", "email", "checklist_field_id"];
-const VALUE_KEYS: [&str; 3] = ["mode", "worklog", "enabled"];
+const VALUE_KEYS: [&str; 4] = ["mode", "worklog", "enabled", "auto_send"];
 
 async fn put_settings(State((p, ctx)): State<St>, body: axum::body::Bytes) -> Res {
     let bad = |m: String| RouteError(ApiError::Validation(m));
@@ -115,4 +122,32 @@ async fn test(State((p, ctx)): State<St>) -> Res {
         )),
         Err(e) => Err(RouteError(ApiError::PluginUnavailable(e.to_string()))),
     }
+}
+
+async fn get_queue(State((p, ctx)): State<St>) -> Res {
+    Ok(Json(p.queue_json(&ctx).await?))
+}
+
+async fn send_queue(State((p, ctx)): State<St>) -> Res {
+    let (_, conn) = p.conn(&ctx).await?;
+    if let Err(why) = conn {
+        return Err(RouteError(ApiError::Validation(format!(
+            "Jira не настроена: {why}"
+        ))));
+    }
+    let r = p.flush(&ctx).await?;
+    let mut v = p.queue_json(&ctx).await?;
+    v["sent"] = json!(r.sent);
+    v["error"] = json!(r.error);
+    Ok(Json(v))
+}
+
+async fn drop_queued(State((p, ctx)): State<St>, Path(id): Path<i64>) -> Res {
+    if queue::drop_op(ctx.pool(), id)
+        .await
+        .map_err(anyhow::Error::from)?
+    {
+        tracing::info!(id, "запись убрана из очереди Jira");
+    }
+    Ok(Json(p.queue_json(&ctx).await?))
 }

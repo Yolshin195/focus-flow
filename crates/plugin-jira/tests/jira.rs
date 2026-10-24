@@ -1,6 +1,7 @@
 //! Плагин Jira против заглушки `wiremock`: автопоиск поля, импорт,
 //! добавление и завершение пунктов (с перечитыванием поля), worklog,
-//! авторизация Data Center/Cloud, ненастроенный плагин, маршруты.
+//! авторизация Data Center/Cloud, ненастроенный плагин, маршруты, очередь
+//! отправки (ручная и автоматическая).
 
 use std::sync::Arc;
 
@@ -133,10 +134,18 @@ impl Env {
             .collect()
     }
 
-    /// Импорт `ABC-1` с чек-листом `SAMPLE` (поле задано в настройках) и
-    /// доставка `TaskImported`.
+    /// Импорт `ABC-1` с чек-листом `SAMPLE` (поле задано в настройках,
+    /// автоотправка включена) и доставка `TaskImported`.
     async fn imported(&self) -> focus_api_types::ImportResult {
-        self.configure(json!({"checklist_field_id": FIELD})).await;
+        self.imported_with(json!({"auto_send": true})).await
+    }
+
+    async fn imported_with(&self, extra: Value) -> focus_api_types::ImportResult {
+        let mut cfg = json!({"checklist_field_id": FIELD});
+        for (k, v) in extra.as_object().unwrap() {
+            cfg[k] = v.clone();
+        }
+        self.configure(cfg).await;
         self.mount_issue("ABC-1", SAMPLE).await;
         let r = self
             .app
@@ -660,6 +669,117 @@ async fn server_errors_are_retried() {
     e.deliver().await;
     let st = e.app.service.plugin_status().await.unwrap();
     assert!(st[0].healthy && st[0].outbox_pending == 0, "{st:?}");
+}
+
+/// По умолчанию ничего не уходит в Jira само: операции копятся в очереди,
+/// лишние можно убрать, остальное — отправить кнопкой.
+#[tokio::test]
+async fn manual_queue_send_and_drop() {
+    let e = env().await;
+    let r = e.imported_with(json!({})).await;
+    let (_, v) = e.http("GET", "/api/plugins/jira/settings", None).await;
+    assert_eq!(v["auto_send"], false);
+    let item = r
+        .task
+        .children
+        .iter()
+        .find(|c| c.title.starts_with("(1)"))
+        .unwrap();
+    e.app
+        .service
+        .create_task(NewTask::child(r.task.id, "Новый пункт"))
+        .await
+        .unwrap();
+    e.app.service.start_work(item.id).await.unwrap();
+    e.clock.advance(Duration::minutes(20));
+    e.app.service.interrupt().await.unwrap();
+    e.app
+        .service
+        .update_task(
+            item.id,
+            TaskPatch {
+                status: Some(TaskStatus::Done),
+                ..TaskPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+    e.deliver().await;
+    assert!(e.jira.received_requests().await.unwrap().is_empty());
+    let st = e.app.service.plugin_status().await.unwrap();
+    assert!(st[0].healthy && st[0].outbox_pending == 0, "{st:?}");
+
+    let (code, q) = e.http("GET", "/api/plugins/jira/queue", None).await;
+    assert_eq!(code, StatusCode::OK);
+    let kinds: Vec<&str> = q["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["checklist_add", "worklog", "checklist_done"], "{q}");
+    assert_eq!(q["items"][1]["seconds"], 1200);
+    assert_eq!(q["items"][1]["issue_key"], "ABC-1");
+    let (_, v) = e.http("GET", "/api/plugins/jira/settings", None).await;
+    assert_eq!(v["queue_pending"], 3);
+
+    // Worklog не нужен — убрать; повтор события его не вернёт.
+    let wid = q["items"][1]["id"].as_i64().unwrap();
+    let (code, q) = e
+        .http("DELETE", &format!("/api/plugins/jira/queue/{wid}"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(q["items"].as_array().unwrap().len(), 2);
+    let status: String = sqlx::query_scalar("SELECT status FROM jira_queue WHERE id = ?")
+        .bind(wid)
+        .fetch_one(e.app.storage.pool())
+        .await
+        .unwrap();
+    assert_eq!(status, "dropped");
+
+    // Jira отклоняет запрос — отправка останавливается, ошибка на записи.
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/issue/ABC-1"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "errorMessages": [], "errors": {FIELD: "плохо"}
+        })))
+        .mount(&e.jira)
+        .await;
+    let (code, q) = e.http("POST", "/api/plugins/jira/queue/send", None).await;
+    assert_eq!(code, StatusCode::OK, "{q}");
+    assert_eq!(q["sent"], 0);
+    assert!(q["error"].as_str().unwrap().contains("400"), "{q}");
+    assert_eq!(q["items"][0]["attempts"], 1);
+    assert!(
+        q["items"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .contains("400")
+    );
+
+    e.jira.reset().await;
+    e.mount_issue("ABC-1", SAMPLE).await;
+    e.mount_put("ABC-1").await;
+    let (_, q) = e.http("POST", "/api/plugins/jira/queue/send", None).await;
+    assert_eq!(q["sent"], 2, "{q}");
+    assert!(q["error"].is_null());
+    assert!(q["items"].as_array().unwrap().is_empty());
+    assert_eq!(e.requests("PUT", "/rest/api/2/issue/ABC-1").await.len(), 2);
+    assert!(
+        e.requests("POST", "/rest/api/2/issue/ABC-1/worklog")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn queue_send_needs_configuration() {
+    let e = env().await;
+    let (code, v) = e.http("POST", "/api/plugins/jira/queue/send", None).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    let (code, v) = e.http("GET", "/api/plugins/jira/queue", None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(v["items"], json!([]));
 }
 
 #[tokio::test]

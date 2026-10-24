@@ -40,3 +40,8 @@ bin/     focus-flow                                                             
 - Логи: `tracing`. Время в домене — `chrono::DateTime<Utc>`; границы дня — в локальном поясе системы.
 - Секретов в репозитории нет: токены — через `keyring` или переменные окружения.
 - Если решения нет в SPEC — принять разумное, записать в `docs/DECISIONS.md` и продолжить.
+
+## Облачные сессии
+
+- Окружение готовит `scripts/cloud-setup.sh` (хук SessionStart в `.claude/settings.json`): готовый `dx` той же версии, что `dioxus` в `Cargo.lock`, его `wasm-bindgen` и `esbuild` для web, системные библиотеки для desktop, `cargo fetch`. Не переустанавливай `dx` (`cargo install` и `cargo binstall dioxus-cli` здесь собирают его из исходников ~25 минут) и не делай `cargo clean`. Если `dx` или его инструментов нет — смотри вывод хука и перезапусти `bash scripts/cloud-setup.sh`, а не собирай из исходников.
+- Проверяй только затронутые крейты: web — `cargo check -p web --target wasm32-unknown-unknown` или `dx build` в `apps/web`; сервис — `cargo test -p focus-core -p focus-storage …`. Полный `cargo test --workspace` — один раз перед PR.

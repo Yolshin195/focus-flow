@@ -20,6 +20,7 @@ use futures_util::StreamExt;
 use crate::api::ApiHandle;
 use crate::fmt;
 use crate::platform::PlatformHandle;
+use crate::timer::TimerView;
 
 /// Начальное состояние интерфейса для демо и скриншотов (`FOCUS_MOCK_SCENARIO`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -81,6 +82,8 @@ pub struct AppState {
     pub busy: Signal<bool>,
     /// Связь с сервисом.
     pub conn: Signal<Conn>,
+    /// Сколько раз извне окна (трей) попросили открыть «Фокус» — см. [`AppState::reveal`].
+    pub(crate) focus_requests: Signal<u64>,
     /// Последний статус от сервиса как есть (`status` — он же, досчитанный).
     pub(crate) base_status: Signal<Option<Stamped<StatusDto>>>,
     /// Последний день от сервиса как есть.
@@ -88,6 +91,37 @@ pub struct AppState {
     /// Досчитывать время между снимками (у сервиса); мок опрашивается
     /// каждую секунду и может стоять на месте (`FOCUS_MOCK_SPEED=0`).
     local_clock: bool,
+}
+
+/// Что открыть на экране «Фокус» по запросу извне окна (трей, строка меню).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reveal {
+    /// Только экран «Фокус».
+    Focus,
+    /// «Фокус» с предупреждением «Прервать работу?» — прервать можно только
+    /// из окна, через это предупреждение.
+    Interrupt,
+    /// «Фокус» с выбором пункта — без пункта работа не стартует.
+    StartWork,
+}
+
+impl AppState {
+    /// Открыть «Фокус» и, если фаза подходит, диалог. Окно показывает сама
+    /// платформа; переход на экран делает layout.
+    pub fn reveal(mut self, what: Reveal) {
+        *self.focus_requests.write() += 1;
+        let view = TimerView::of(self.status.peek().as_ref());
+        match (what, view) {
+            (Reveal::Interrupt, TimerView::Work { .. }) => {
+                self.done_choice.set(false);
+                self.interrupt_dialog.set(true);
+            }
+            (Reveal::StartWork, TimerView::Idle | TimerView::Planning { .. }) => {
+                self.picker_open.set(true);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Достаёт `FocusApi` из контекста.
@@ -159,6 +193,7 @@ pub fn use_app_provider(preset: UiPreset) -> AppState {
         preset: Signal::new(preset),
         busy: Signal::new(false),
         conn: Signal::new(Conn::Unknown),
+        focus_requests: Signal::new(0),
         base_status: Signal::new(None),
         base_day: Signal::new(None),
         local_clock,

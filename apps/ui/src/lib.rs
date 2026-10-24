@@ -11,12 +11,14 @@ mod layout;
 pub mod platform;
 mod screens;
 pub mod state;
+pub mod timer;
 
 use dioxus::prelude::*;
 
 pub use api::{ApiHandle, FocusApi, HttpApi, JiraSettingsApi, MockApi, MockJira, MockScenario};
 pub use platform::{NoopPlatform, Platform, PlatformHandle};
-pub use state::UiPreset;
+pub use state::{Reveal, UiPreset};
+pub use timer::{use_status_line, use_timer_view, Indicator, StatusLine, TimerView};
 
 use layout::Layout;
 use screens::{Day, Focus, Settings, Tasks};
@@ -46,8 +48,12 @@ pub enum Route {
 }
 
 /// Корневой компонент. Ждёт в контексте [`PlatformHandle`] и [`ApiHandle`].
+///
+/// `children` — платформенные компоненты без разметки (трей на desktop):
+/// они видят состояние приложения (`state::use_app`), но не роутер; открыть
+/// экран им помогает [`state::AppState::reveal`].
 #[component]
-pub fn App(#[props(default)] preset: UiPreset) -> Element {
+pub fn App(#[props(default)] preset: UiPreset, children: Element) -> Element {
     let platform = use_context::<PlatformHandle>();
     let app = state::use_app_provider(preset);
     let motion = use_motion(app);
@@ -63,6 +69,7 @@ pub fn App(#[props(default)] preset: UiPreset) -> Element {
         div { class,
             Router::<Route> {}
         }
+        {children}
     }
 }
 

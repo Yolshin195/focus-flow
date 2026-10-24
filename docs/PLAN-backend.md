@@ -2,7 +2,7 @@
 
 Выполняет сессия A. Каждый шаг — отдельный субагент со свежим контекстом. После шага: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` зелёные → коммит → отметка `[x]` здесь → следующий шаг.
 
-- [ ] **0. Каркас сервиса и контракт.** В репозитории уже есть `apps/ui|desktop|web|mobile` из шаблона dx Workspace (пакеты `ui`, `desktop`, `web`, `mobile`). `apps/` не трогать.
+- [x] **0. Каркас сервиса и контракт.** В репозитории уже есть `apps/ui|desktop|web|mobile` из шаблона dx Workspace (пакеты `ui`, `desktop`, `web`, `mobile`). `apps/` не трогать.
     1. Создать `crates/{api-types,api-contract-tests,core,storage,plugin-api,plugin-jira,api-rest,api-mcp,server}` (`cargo new --lib --vcs none --name focus-<имя>`) и `bin/focus-flow` (`cargo new --vcs none --name focus-flow`). Пустые `lib.rs` — с doc-комментарием о назначении.
     2. Корневой `Cargo.toml`: `resolver = "3"`; `members = ["apps/ui", "apps/desktop", "apps/web", "crates/*", "bin/*"]` (`apps/mobile` — в `exclude`, пока нет мобильных toolchain'ов); `[workspace.package]` (edition 2024, version 0.1.0, license MIT) для новых крейтов; в `[workspace.dependencies]` к существующим `dioxus` и `ui` добавить `focus-api-types = { path = "crates/api-types" }` и общие версии (axum, tokio, sqlx с sqlite, reqwest, rmcp, async-trait, thiserror, anyhow, tracing, clap, serde, chrono, uuid). Новые крейты берут зависимости через `{ workspace = true }`.
     3. `focus-api-types` — контракт клиента и сервиса (только serde, chrono, uuid, async-trait, thiserror):

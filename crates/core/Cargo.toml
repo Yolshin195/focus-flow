@@ -1,0 +1,8 @@
+[package]
+name = "focus-core"
+description = "Домен Focus Flow: правила таймера, события, outbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

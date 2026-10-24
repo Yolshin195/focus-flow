@@ -1,0 +1,8 @@
+[package]
+name = "focus-server"
+description = "Сборка сервиса Focus Flow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

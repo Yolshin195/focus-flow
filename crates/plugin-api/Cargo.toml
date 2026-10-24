@@ -1,0 +1,8 @@
+[package]
+name = "focus-plugin-api"
+description = "Плагинный API Focus Flow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -1,0 +1,8 @@
+[package]
+name = "focus-api-rest"
+description = "REST + SSE вход Focus Flow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

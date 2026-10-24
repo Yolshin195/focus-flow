@@ -685,6 +685,21 @@
         }
       })();
     </script>
+    <script>
+      // Офлайн и мгновенный повторный запуск — public/sw.js. Только в
+      // release-сборке (у dx serve wasm лежит не в assets/) и после запуска
+      // приложения: wasm уже скачан, SW возьмёт его из HTTP-кэша.
+      if ("serviceWorker" in navigator && "{wasm_path}".indexOf("assets/") === 0) {
+        new MutationObserver(function (_, observer) {
+          if (document.getElementById("boot")) return;
+          observer.disconnect();
+          navigator.serviceWorker.register("/{base_path}/sw.js", {
+            scope: "/{base_path}/",
+            updateViaCache: "none",
+          });
+        }).observe(document.getElementById("main"), { childList: true });
+      }
+    </script>
     <noscript><p class="noscript">Focus Flow работает на WebAssembly — включите JavaScript.</p></noscript>
 </body>
 </html>

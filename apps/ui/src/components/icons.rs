@@ -29,6 +29,8 @@ pub enum Icon {
     Rest,
     /// Планирование — список с карандашом.
     Plan,
+    /// Настройки — ползунки.
+    Settings,
 }
 
 #[component]
@@ -108,6 +110,13 @@ impl Icon {
                 Svg { size,
                     path { d: "M4 5h7M4 9h5M4 13h4" }
                     path { d: "M15.5 7.5l1.5 1.5-6 6-2.2.7.7-2.2z" }
+                }
+            },
+            Icon::Settings => rsx! {
+                Svg { size,
+                    path { d: "M4 6h6M14 6h2M4 14h2M10 14h6" }
+                    circle { cx: "12", cy: "6", r: "2" }
+                    circle { cx: "8", cy: "14", r: "2" }
                 }
             },
             Icon::Play => rsx! {

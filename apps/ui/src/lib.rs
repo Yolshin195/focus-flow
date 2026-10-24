@@ -14,12 +14,12 @@ pub mod state;
 
 use dioxus::prelude::*;
 
-pub use api::{ApiHandle, FocusApi, HttpApi, MockApi, MockScenario};
+pub use api::{ApiHandle, FocusApi, HttpApi, JiraSettingsApi, MockApi, MockJira, MockScenario};
 pub use platform::{NoopPlatform, Platform, PlatformHandle};
 pub use state::UiPreset;
 
 use layout::Layout;
-use screens::{Day, Focus, Tasks};
+use screens::{Day, Focus, Settings, Tasks};
 
 const TOKENS_CSS: Asset = asset!("/assets/tokens.css");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -35,6 +35,8 @@ pub enum Route {
         Tasks {},
         #[route("/day")]
         Day {},
+        #[route("/settings")]
+        Settings {},
 }
 
 /// Корневой компонент. Ждёт в контексте [`PlatformHandle`] и [`ApiHandle`].

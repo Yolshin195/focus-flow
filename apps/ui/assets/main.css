@@ -137,6 +137,14 @@ button:disabled {
   background: var(--surface-2);
 }
 
+.nav-bottom {
+  margin-top: auto;
+}
+
+.nav-bottom + .side-progress {
+  margin-top: 0;
+}
+
 .side-progress {
   margin-top: auto;
   width: 100%;
@@ -1692,4 +1700,280 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .conn-banner,
   .conn-dot { animation: none; }
+}
+
+/* ───────── Настройки ───────── */
+
+.settings {
+  max-width: 820px;
+}
+
+.card {
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.card-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.card-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2) var(--sp-5);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+}
+
+.form-label {
+  padding-top: 12px;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.form-control {
+  min-width: 0;
+}
+
+.form-hint {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.form .field {
+  height: 42px;
+  padding-right: var(--sp-3);
+}
+
+.field-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.field-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.saved-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--rest);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.resolved {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border-radius: var(--r-md);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+}
+
+.seg-btn {
+  height: 34px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+  padding-top: 11px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+}
+
+.toggle.on {
+  color: var(--text);
+}
+
+.toggle:hover .check {
+  border-color: var(--text-2);
+}
+
+.toggle.on .check {
+  background: var(--work);
+  border-color: var(--work);
+}
+
+.btn-accent {
+  background: var(--work);
+  color: #fff;
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: #6d99ff;
+}
+
+.notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.notice-ok {
+  color: var(--rest);
+}
+
+.notice-err {
+  color: var(--interrupted);
+}
+
+.plugin-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.badge-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge-state.ok {
+  color: var(--rest);
+  background: var(--rest-soft);
+}
+
+.badge-state.err {
+  color: var(--interrupted);
+  background: var(--interrupted-soft);
+}
+
+.plugin-queue {
+  flex: none;
+  color: var(--planning);
+  font-size: var(--fs-xs);
+}
+
+.plugin-detail {
+  min-width: 0;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.settings-alert {
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--interrupted-soft);
+  color: var(--interrupted);
+  font-size: var(--fs-sm);
+}
+
+.settings-note {
+  margin: var(--sp-4) var(--sp-1) 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* Подсказка под импортом в «Задачах», когда Jira не подключена */
+.import-note {
+  grid-column: 2;
+  margin: calc(-1 * var(--sp-1)) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.import-note a {
+  color: var(--work);
+  text-decoration: none;
+}
+
+.import-note a:hover {
+  text-decoration: underline;
 }

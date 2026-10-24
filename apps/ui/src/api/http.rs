@@ -21,6 +21,8 @@ use reqwest::{Method, RequestBuilder, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use super::jira::{JiraPatch, JiraSettingsApi, JiraState, JiraTestResult};
+
 /// Таймаут обычного запроса. Сервис локальный — дольше ждать незачем.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -99,11 +101,11 @@ impl HttpApi {
         Err(err)
     }
 
-    async fn get<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
+    pub(crate) async fn get<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         self.send(self.request(Method::GET, path)).await
     }
 
-    async fn post<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
+    pub(crate) async fn post<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         self.send(self.request(Method::POST, path)).await
     }
 
@@ -113,6 +115,14 @@ impl HttpApi {
         b: &B,
     ) -> ApiResult<T> {
         self.send(self.request(Method::POST, path).json(b)).await
+    }
+
+    pub(crate) async fn put_json<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        b: &B,
+    ) -> ApiResult<T> {
+        self.send(self.request(Method::PUT, path).json(b)).await
     }
 
     /// Открыть поток SSE `GET /api/events`. Элемент потока — события из
@@ -224,6 +234,19 @@ fn parse_block(block: &str) -> Option<ServerEvent> {
         return None; // keep-alive `: ping`
     }
     serde_json::from_str(&data).ok()
+}
+
+#[async_trait(?Send)]
+impl JiraSettingsApi for HttpApi {
+    async fn jira_settings(&self) -> ApiResult<JiraState> {
+        self.get("/api/plugins/jira/settings").await
+    }
+    async fn save_jira_settings(&self, patch: JiraPatch) -> ApiResult<JiraState> {
+        self.put_json("/api/plugins/jira/settings", &patch).await
+    }
+    async fn test_jira(&self) -> ApiResult<JiraTestResult> {
+        self.post("/api/plugins/jira/test").await
+    }
 }
 
 #[async_trait(?Send)]

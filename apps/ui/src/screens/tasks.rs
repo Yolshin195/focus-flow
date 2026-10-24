@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use dioxus::prelude::*;
-use focus_api_types::{ActiveSession, NewTask, TaskDto, TaskId, TaskStatus};
+use focus_api_types::{ActiveSession, ApiError, NewTask, TaskDto, TaskId, TaskStatus};
 
 use crate::api::jira_key;
 use crate::components::Icon;
@@ -80,6 +80,22 @@ pub fn Tasks() -> Element {
     let import_enter = import.clone();
     let import_click = import;
     let link_valid = jira_key(&link.read()).is_some();
+    // Подключена ли Jira: без неё импорт не сработает — сразу скажем об этом
+    // и дадим ссылку на настройки. Ошибка запроса — считаем, что неизвестно.
+    let api_jira = api.clone();
+    let jira = use_resource(move || {
+        let api = api_jira.clone();
+        async move { api.jira().jira_settings().await }
+    });
+    let jira_note: Option<&str> = match &*jira.read() {
+        Some(Ok(s)) if !s.enabled => Some("Плагин Jira выключен."),
+        Some(Ok(s)) if !s.configured => Some("Jira не подключена."),
+        Some(Err(ApiError::Transport(m))) if m.contains("404") => {
+            Some("Плагин Jira не собран в этот сервис.")
+        }
+        _ => None,
+    };
+    let jira_ready = jira_note.is_none();
     let api_plan = api.clone();
 
     rsx! {
@@ -127,21 +143,27 @@ pub fn Tasks() -> Element {
                 div { class: "field field-import",
                     input {
                         r#type: "text",
-                        placeholder: "Вставь ссылку на задачу Jira",
+                        placeholder: if jira_ready { "Вставь ссылку на задачу Jira" } else { "Импорт из Jira" },
                         value: "{link}",
                         "aria-label": "Ссылка на задачу Jira",
                         oninput: move |e| link.set(e.value()),
                         onkeydown: move |e: KeyboardEvent| {
-                            if e.key() == Key::Enter {
+                            if e.key() == Key::Enter && jira_ready {
                                 import_enter();
                             }
                         },
                     }
                     button {
                         class: "btn btn-small",
-                        disabled: !link_valid || busy,
+                        disabled: !link_valid || busy || !jira_ready,
                         onclick: move |_| import_click(),
                         "Импорт"
+                    }
+                }
+                if let Some(note) = jira_note {
+                    p { class: "import-note", role: "note",
+                        "{note} "
+                        Link { to: Route::Settings {}, "Подключить в настройках" }
                     }
                 }
             }

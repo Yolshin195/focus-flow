@@ -37,6 +37,8 @@ pub enum UiPreset {
     Tasks,
     /// Сразу экран «День».
     Day,
+    /// Сразу экран «Настройки».
+    Settings,
 }
 
 impl UiPreset {
@@ -48,6 +50,7 @@ impl UiPreset {
             "done-choice" => Self::DoneChoice,
             "tasks" => Self::Tasks,
             "day" => Self::Day,
+            "settings" => Self::Settings,
             _ => Self::None,
         }
     }

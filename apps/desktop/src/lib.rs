@@ -12,7 +12,8 @@
 //!
 //! `FOCUS_MOCK=1` (или заданный `FOCUS_MOCK_SCENARIO`) — `MockApi` для демо:
 //! - `FOCUS_MOCK_SCENARIO` — `idle` (по умолчанию) | `work` | `rest` | `planning` |
-//!   `empty` | `picker` | `interrupt` | `done-choice` | `tasks` | `day`;
+//!   `empty` | `picker` | `interrupt` | `done-choice` | `tasks` | `day` | `settings`;
+//! - `FOCUS_MOCK_JIRA=off` — в моке Jira не настроена (по умолчанию «подключена»);
 //! - `FOCUS_MOCK_SPEED` — во сколько раз время мока быстрее реального (по умолчанию 1);
 //! - `FOCUS_WINDOW_SIZE` — размер окна `ШxВ` (по умолчанию `1180x780`).
 
@@ -22,7 +23,9 @@ use dioxus::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use ui::{ApiHandle, App, HttpApi, MockApi, MockScenario, Platform, PlatformHandle, UiPreset};
+use ui::{
+    ApiHandle, App, HttpApi, MockApi, MockJira, MockScenario, Platform, PlatformHandle, UiPreset,
+};
 
 /// Адрес сервиса по умолчанию — как у `focus-flow serve`.
 const DEFAULT_ADDR: &str = "127.0.0.1:7878";
@@ -147,7 +150,13 @@ fn Root() -> Element {
         let speed = env("FOCUS_MOCK_SPEED")
             .and_then(|s| s.parse::<f64>().ok())
             .unwrap_or(1.0);
-        ApiHandle::new(MockApi::demo(MockScenario::parse(&scenario()), speed))
+        // В демо Jira «подключена»; `FOCUS_MOCK_JIRA=off` — как без настройки.
+        let jira = if env("FOCUS_MOCK_JIRA").as_deref() == Some("off") {
+            MockJira::unconfigured()
+        } else {
+            MockJira::demo()
+        };
+        ApiHandle::new(MockApi::demo(MockScenario::parse(&scenario()), speed)).with_jira(jira)
     });
     let preset = UiPreset::parse(&scenario());
     rsx! { App { preset } }

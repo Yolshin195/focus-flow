@@ -20,6 +20,9 @@ pub fn Layout() -> Element {
         UiPreset::Day => {
             nav.replace(Route::Day {});
         }
+        UiPreset::Settings => {
+            nav.replace(Route::Settings {});
+        }
         _ => {}
     });
     let (worked, target) = app
@@ -50,6 +53,9 @@ pub fn Layout() -> Element {
                     NavItem { to: Route::Focus {}, icon: Icon::Focus, label: "Фокус" }
                     NavItem { to: Route::Tasks {}, icon: Icon::Tasks, label: "Задачи" }
                     NavItem { to: Route::Day {}, icon: Icon::Day, label: "День" }
+                }
+                div { class: "nav nav-bottom",
+                    NavItem { to: Route::Settings {}, icon: Icon::Settings, label: "Настройки" }
                 }
                 div { class: "side-progress", title: "Норма дня",
                     div { class: "side-progress-value num", "{fmt::hm(worked)}" }

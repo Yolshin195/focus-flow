@@ -212,9 +212,13 @@ pub fn launch(opts: Options, on_exit: impl FnOnce() + 'static) {
         "<style>html,body{{margin:0;background:rgb({r},{g},{b});color-scheme:dark;}}</style>"
     );
     let mut on_exit = Some(on_exit);
-    let cfg = Config::new()
-        .with_window(window)
-        .with_menu(None)
+    let cfg = Config::new().with_window(window);
+    // На macOS меню оставляем стандартным: без меню Edit в WKWebView не
+    // работают ⌘C/⌘V/⌘X/⌘A (не вставить токен Jira или ссылку), а без
+    // меню приложения — ⌘Q. На Linux и Windows меню в окне не нужно.
+    #[cfg(not(target_os = "macos"))]
+    let cfg = cfg.with_menu(None);
+    let cfg = cfg
         .with_background_color((r, g, b, 255))
         .with_custom_head(head)
         .with_custom_event_handler(move |ev, _| {

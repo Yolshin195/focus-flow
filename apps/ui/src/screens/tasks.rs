@@ -330,6 +330,27 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
     let can_start = matches!(active, None | Some(ActiveSession::Planning { .. }));
     let api_done = api.clone();
     let api_start = api.clone();
+    // Пункт без родителя можно разбить на пункты — тогда он станет задачей.
+    let mut adding = use_signal(|| false);
+    let mut draft = use_signal(String::new);
+    let mut draft_reset = use_signal(|| 0u32);
+    let api_add = api.clone();
+    let mut add = move || {
+        let t = draft.peek().trim().to_string();
+        if t.is_empty() {
+            adding.set(false);
+            return;
+        }
+        run(
+            api_add.clone(),
+            app,
+            Command::Create(NewTask::child(id, t)),
+            move || {
+                draft.set(String::new());
+                draft_reset += 1;
+            },
+        );
+    };
 
     rsx! {
         div {
@@ -358,6 +379,41 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
                     },
                     {Icon::Play.render(12)}
                     "Взять в работу"
+                }
+            }
+            if loose && !done && !in_work {
+                button {
+                    class: "btn btn-ghost btn-small take",
+                    title: "Разбить на пункты — станет задачей",
+                    onclick: move |_| adding.set(true),
+                    {Icon::Plus.render(12)}
+                    "Пункт"
+                }
+            }
+        }
+        if adding() {
+            div { class: "item-add",
+                TextInput {
+                    reset: draft_reset(),
+                    refocus: true,
+                    class: "inline-input",
+                    placeholder: "Пункт для «{item.title}» — Enter, чтобы добавить",
+                    label: "Новый пункт",
+                    autofocus: true,
+                    on_input: move |v| draft.set(v),
+                    on_keydown: move |e: KeyboardEvent| match e.key() {
+                        Key::Enter => add(),
+                        Key::Escape => {
+                            draft.set(String::new());
+                            adding.set(false);
+                        }
+                        _ => {}
+                    },
+                    on_blur: move |_| {
+                        if draft.peek().trim().is_empty() {
+                            adding.set(false);
+                        }
+                    },
                 }
             }
         }

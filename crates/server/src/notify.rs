@@ -68,8 +68,9 @@ mod desktop {
         fn notify(&self, title: &str, body: &str) {
             let mut n = notify_rust::Notification::new();
             n.summary(title).body(body).appname("Focus Flow");
+            // Имя «default» на macOS не звук: нужна системная константа.
             #[cfg(target_os = "macos")]
-            n.sound_name("default");
+            n.sound_name("NSUserNotificationDefaultSoundName");
             #[cfg(not(target_os = "macos"))]
             n.sound_name("message-new-instant");
             if let Err(e) = n.show() {

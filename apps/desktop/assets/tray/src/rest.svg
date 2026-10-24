@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" color="#000">
+  <!-- Отдых: чашка с паром (как иконка отдыха в окне), залитая. -->
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.2 1.9c-.7.9.7 1.6 0 2.9M9.4 1.9c-.7.9.7 1.6 0 2.9" stroke-width="1.4"/>
+    <path d="M13.3 8.4h1a2.05 2.05 0 0 1 0 4.1h-1" stroke-width="1.5"/>
+  </g>
+  <path d="M2.4 7.1h11.1v4.1a4.6 4.6 0 0 1-4.6 4.6H7a4.6 4.6 0 0 1-4.6-4.6z" fill="currentColor"/>
+</svg>

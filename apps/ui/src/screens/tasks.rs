@@ -25,6 +25,8 @@ pub fn Tasks() -> Element {
     let collapsed = use_signal(HashSet::<TaskId>::new);
 
     let tree = app.tasks.read().clone();
+    // Пункты без родителя — одной группой в конце.
+    let loose: Vec<TaskDto> = tree.iter().filter(|t| t.is_item()).cloned().collect();
     let open_items: usize = tree
         .iter()
         .map(|t| {
@@ -154,8 +156,20 @@ pub fn Tasks() -> Element {
             }
 
             div { class: "tree",
-                for task in tree.iter().cloned() {
+                for task in tree.iter().filter(|t| !t.is_item()).cloned() {
                     TaskNode { key: "{task.id}", task, collapsed }
+                }
+                if !loose.is_empty() {
+                    div { class: "task task-loose",
+                        div { class: "task-head",
+                            span { class: "task-title", "Без задачи" }
+                        }
+                        div { class: "items",
+                            for item in loose.iter().cloned() {
+                                ItemRow { key: "{item.id}", item, loose: true }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -175,15 +189,6 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
     let done = is_done(&task);
     let total = task.children.len();
     let closed = task.children.iter().filter(|c| is_done(c)).count();
-
-    if task.is_item() && task.parent_id.is_none() && !*adding.read() {
-        // Пункт без родителя — одна строка.
-        return rsx! {
-            div { class: "task task-loose",
-                ItemRow { item: task.clone(), loose: true }
-            }
-        };
-    }
 
     let api_add = api.clone();
     let mut add = move || {

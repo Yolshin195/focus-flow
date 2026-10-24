@@ -32,6 +32,11 @@
   --planning: #f5b841;
   --planning-soft: rgba(245, 184, 65, 0.14);
   --planning-glow: rgba(245, 184, 65, 0.07);
+  /* Непрозрачные заливки блоков шкалы дня */
+  --work-block: #1a2335;
+  --rest-block: #14271f;
+  --planning-block: #2a2417;
+  --interrupted-block: #2d1c20;
   --lost: #5b616c;
   --lost-soft: rgba(91, 97, 108, 0.22);
   --interrupted: #d9686e;

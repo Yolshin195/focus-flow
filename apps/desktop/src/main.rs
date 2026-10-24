@@ -3,7 +3,8 @@
 //! Переменные окружения для разработки и демо:
 //! - `FOCUS_MOCK_SCENARIO` — `idle` (по умолчанию) | `work` | `rest` | `planning` |
 //!   `empty` | `picker` | `interrupt` | `done-choice` | `tasks` | `day`;
-//! - `FOCUS_MOCK_SPEED` — во сколько раз время мока быстрее реального (по умолчанию 1).
+//! - `FOCUS_MOCK_SPEED` — во сколько раз время мока быстрее реального (по умолчанию 1);
+//! - `FOCUS_WINDOW_SIZE` — размер окна `ШxВ` (по умолчанию `1180x780`).
 
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 use dioxus::prelude::*;
@@ -57,11 +58,23 @@ fn Root() -> Element {
     rsx! { App { preset } }
 }
 
+/// Размер окна из `FOCUS_WINDOW_SIZE` (`960x640`) или по умолчанию.
+fn window_size() -> (f64, f64) {
+    std::env::var("FOCUS_WINDOW_SIZE")
+        .ok()
+        .and_then(|v| {
+            let (w, h) = v.split_once('x')?;
+            Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+        })
+        .unwrap_or((1180.0, 780.0))
+}
+
 fn main() {
     let (r, g, b) = BG;
+    let (w, h) = window_size();
     let window = WindowBuilder::new()
         .with_title("Focus Flow")
-        .with_inner_size(LogicalSize::new(1180.0, 780.0))
+        .with_inner_size(LogicalSize::new(w, h))
         .with_min_inner_size(LogicalSize::new(960.0, 640.0));
     let head = format!(
         "<style>html,body{{margin:0;background:rgb({r},{g},{b});color-scheme:dark;}}</style>"

@@ -46,10 +46,8 @@ pub fn Layout() -> Element {
                     NavItem { to: Route::Day {}, icon: Icon::Day, label: "День" }
                 }
                 div { class: "side-progress", title: "Норма дня",
-                    div { class: "side-progress-value",
-                        span { class: "num", "{fmt::hm(worked)}" }
-                        span { class: "side-progress-of", " / {fmt::hm(target)}" }
-                    }
+                    div { class: "side-progress-value num", "{fmt::hm(worked)}" }
+                    div { class: "side-progress-of", "из " span { class: "num", "{fmt::hm(target)}" } }
                     div { class: "side-progress-bar",
                         div { class: "side-progress-fill", style: "width: {pct:.2}%" }
                     }

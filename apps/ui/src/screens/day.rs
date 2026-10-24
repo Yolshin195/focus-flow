@@ -6,7 +6,7 @@ use focus_api_types::{EndReason, SessionDto, SessionId, SessionKind, TimeRange};
 
 use crate::components::{kind_class, kind_label};
 use crate::fmt;
-use crate::state::use_app;
+use crate::state::{use_app, UiPreset};
 
 /// Пикселей на минуту шкалы.
 const PX_PER_MIN: f64 = 1.6;
@@ -36,6 +36,26 @@ pub fn Day() -> Element {
     let app = use_app();
     let mut pick = use_signal(|| None::<Pick>);
     let day = app.day.read().clone();
+    // Демо: сразу показать детали прерванной сессии.
+    if *app.preset.peek() == UiPreset::Day && pick.peek().is_none() {
+        if let Some(s) = day.as_ref().and_then(|d| {
+            d.sessions
+                .iter()
+                .find(|s| s.end_reason == Some(EndReason::Interrupted))
+        }) {
+            pick.set(Some(Pick::Session(s.id)));
+        }
+    }
+    // Шкала прокручена к «сейчас» при открытии экрана.
+    let mut scrolled = use_signal(|| false);
+    use_effect(move || {
+        if app.day.read().is_some() && !*scrolled.peek() {
+            scrolled.set(true);
+            document::eval(
+                "setTimeout(() => { const el = document.querySelector('.timeline-scroll'); const now = document.querySelector('.now-line'); if (el && now) el.scrollTop = Math.max(0, now.offsetTop - el.clientHeight * 0.7); }, 60);",
+            );
+        }
+    });
     let now = app
         .status
         .read()
@@ -271,7 +291,9 @@ fn SessionBlock(
     if selected {
         class.push_str(" selected");
     }
-    if height < 22.0 {
+    if height < 13.0 {
+        class.push_str(" tiny");
+    } else if height < 22.0 {
         class.push_str(" compact");
     }
     let title = match (s.kind, &s.task_title) {

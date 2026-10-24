@@ -203,33 +203,38 @@ pub fn Focus() -> Element {
         .and_then(|s| s.day.as_ref())
         .map(|d| fmt::local_hm(d.opened_at));
 
-    let (label, tone, progress, digits, sub) = match &view {
-        View::Loading => ("", RingTone::Idle, 0.0, "--:--".to_string(), ""),
+    // Циферблат: по риске на минуту. Отсчёт вниз — горят оставшиеся минуты,
+    // планирование — загораются прошедшие (круг — 50 минут, дальше заново).
+    let (label, tone, ticks, lit, digits, sub) = match &view {
+        View::Loading => ("", RingTone::Idle, 50, 0.0, "--:--".to_string(), ""),
         View::Idle => (
             "Готов к работе",
             RingTone::Idle,
-            0.0,
+            50,
+            1.0,
             "50:00".to_string(),
-            "одна сессия",
+            "один пункт",
         ),
         View::Work { remaining, total } => (
             "Работа",
             RingTone::Work,
-            1.0 - *remaining as f64 / *total as f64,
+            (*total / 60).max(1) as u32,
+            *remaining as f64 / *total as f64,
             fmt::clock(*remaining),
             "осталось",
         ),
         View::Rest { remaining, total } => (
             "Отдых",
             RingTone::Rest,
-            1.0 - *remaining as f64 / *total as f64,
+            (*total / 60).max(1) as u32,
+            *remaining as f64 / *total as f64,
             fmt::clock(*remaining),
             "до конца отдыха",
         ),
         View::Planning { elapsed } => (
             "Планирование",
             RingTone::Planning,
-            // Без лимита: кольцо делает круг за 50 минут, потом начинает заново.
+            50,
             (*elapsed % 3000) as f64 / 3000.0,
             fmt::clock(*elapsed),
             "идёт в норму",
@@ -275,7 +280,7 @@ pub fn Focus() -> Element {
     let api_g = api.clone();
 
     rsx! {
-        div { class: "focus focus-{tone_class(tone)}",
+        div { class: "focus focus-{tone.class()}",
             header { class: "focus-top",
                 div { class: "day-meta",
                     if let Some(t) = day_started {
@@ -296,7 +301,7 @@ pub fn Focus() -> Element {
 
             section { class: "focus-stage", "aria-live": "polite",
                 div { class: "session-label", "{label}" }
-                Ring { tone, progress,
+                Ring { tone, ticks, lit,
                     div { class: "ring-digits num", "{digits}" }
                     div { class: "ring-sub", "{sub}" }
                 }
@@ -421,12 +426,14 @@ pub fn Focus() -> Element {
                             class: "choice-card choice-rest",
                             autofocus: true,
                             onclick: move |_| finish(&api_d, app, DoneNext::Rest),
+                            {Icon::Rest.render(22)}
                             span { class: "choice-title", "Отдых 10 минут" }
                             span { class: "choice-sub", "Встать, пройтись, отвести взгляд" }
                         }
                         button {
                             class: "choice-card choice-planning",
                             onclick: move |_| finish(&api_e, app, DoneNext::Planning),
+                            {Icon::Plan.render(22)}
                             span { class: "choice-title", "Спланировать следующую" }
                             span { class: "choice-sub", "Сразу, без потерянного времени" }
                         }
@@ -499,14 +506,5 @@ fn PickerFooter() -> Element {
                 "Начать 50 минут"
             }
         }
-    }
-}
-
-fn tone_class(t: RingTone) -> &'static str {
-    match t {
-        RingTone::Work => "work",
-        RingTone::Rest => "rest",
-        RingTone::Planning => "planning",
-        RingTone::Idle => "idle",
     }
 }

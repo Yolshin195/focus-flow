@@ -25,6 +25,10 @@ pub enum Icon {
     Close,
     /// Play.
     Play,
+    /// Отдых — чашка.
+    Rest,
+    /// Планирование — список с карандашом.
+    Plan,
 }
 
 #[component]
@@ -92,6 +96,19 @@ impl Icon {
             },
             Icon::Close => rsx! {
                 Svg { size, path { d: "M5.5 5.5l9 9M14.5 5.5l-9 9" } }
+            },
+            Icon::Rest => rsx! {
+                Svg { size,
+                    path { d: "M4 8h10v4a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z" }
+                    path { d: "M14 9h1.2a2 2 0 0 1 0 4H14" }
+                    path { d: "M7.5 3.5c-.6.8.6 1.4 0 2.5M10.5 3.5c-.6.8.6 1.4 0 2.5" }
+                }
+            },
+            Icon::Plan => rsx! {
+                Svg { size,
+                    path { d: "M4 5h7M4 9h5M4 13h4" }
+                    path { d: "M15.5 7.5l1.5 1.5-6 6-2.2.7.7-2.2z" }
+                }
             },
             Icon::Play => rsx! {
                 Svg { size, path { d: "M7 5l8 5-8 5z" } }

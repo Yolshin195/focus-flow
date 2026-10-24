@@ -15,8 +15,9 @@ ui/
    ├─ fonts.rs        # @font-face для шрифтов из assets/fonts
    ├─ fmt.rs          # форматирование времени
    ├─ api/mock.rs     # MockApi — FocusApi в памяти с живым таймером и демо-днём
-   ├─ screens/        # focus.rs, tasks.rs, day.rs
-   └─ components/     # ring, picker, dialog, norm_bar, icons
+   ├─ api/jira.rs     # JiraSettingsApi — настройки плагина Jira (HttpApi, MockJira)
+   ├─ screens/        # focus.rs, tasks.rs, day.rs, settings.rs
+   └─ components/     # ring, picker, dialog, norm_bar, icons, text_input
 ```
 
 `cargo test -p ui` гоняет сценарии `focus-api-contract-tests` на `MockApi`.

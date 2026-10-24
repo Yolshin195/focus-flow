@@ -75,7 +75,10 @@ window.__ffKeys = (e) => {
     const t = e.target;
     const tag = t && t.tagName;
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable);
-    const control = tag === 'BUTTON' || tag === 'A';
+    // Пробел и Enter на кнопке нажимают её саму; на ссылке Enter переходит
+    // по ней, а Пробел ничего не делает — его забираем (фокус остаётся на
+    // пункте навигации после клика).
+    const control = tag === 'BUTTON' || (tag === 'A' && e.key === 'Enter');
     if (e.key === 'Escape') { dioxus.send('Escape'); return; }
     if (typing || control || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === ' ' || e.key === 'Enter') {

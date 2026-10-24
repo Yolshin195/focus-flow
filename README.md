@@ -8,9 +8,9 @@
 |---|---|
 | ![Фокус](docs/screenshots/real-focus-work.png) | ![Задачи](docs/screenshots/real-tasks.png) |
 | **День** | **Настройки Jira** |
-| ![День](docs/screenshots/real-day.png) | ![Настройки](docs/screenshots/real-settings.png) |
+| ![День](docs/screenshots/real-day.png) | ![Настройки](docs/screenshots/settings.png) |
 
-Остальные состояния (простой, выбор пункта, отдых, планирование, «Готово», «Прервать») сняты на моке и лежат в [`docs/screenshots`](docs/screenshots).
+Скриншоты с префиксом `real-` сняты на настоящем сервисе. Настройки и остальные состояния (простой, выбор пункта, отдых, планирование, «Готово», «Прервать») сняты на моке и лежат в [`docs/screenshots`](docs/screenshots).
 
 ## Установка
 

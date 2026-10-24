@@ -1,6 +1,6 @@
 # desktop — Focus Flow для Linux/macOS/Windows
 
-Только `main.rs`: `DesktopPlatform` (уведомления через `notify-rust`), `HttpApi` (или `MockApi` в режиме демо) в контексте, окно 1180×780 (минимум 960×640).
+`lib.rs`: `DesktopPlatform` (уведомления через `notify-rust`), `HttpApi` (или `MockApi` в режиме демо) в контексте, окно 1180×780 (минимум 960×640); вход — `desktop::launch(Options, on_exit)`. Его вызывают `main.rs` (для `dx serve`/`dx build`) и `focus-flow ui` (окно + сервис в одном процессе).
 
 ```bash
 dx serve            # разработка
@@ -9,7 +9,8 @@ dx build            # сборка
 
 Переменные для демо и скриншотов:
 
-- `FOCUS_MOCK_SCENARIO` — `idle` (по умолчанию), `work`, `rest`, `planning`, `picker`, `interrupt`, `done-choice`, `tasks`, `day`, `empty`;
+- `FOCUS_MOCK_SCENARIO` — `idle` (по умолчанию), `work`, `rest`, `planning`, `picker`, `interrupt`, `done-choice`, `tasks`, `day`, `settings`, `empty`;
+- `FOCUS_MOCK_JIRA=off` — Jira в моке не настроена;
 - `FOCUS_MOCK_SPEED` — ускорение часов мока (`60` — минута за секунду, `0` — часы стоят).
 
 ## Сервис

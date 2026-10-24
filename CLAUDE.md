@@ -11,7 +11,7 @@
 ```
 crates/  api-types api-contract-tests core storage plugin-api plugin-jira api-rest api-mcp server   — сервис (пакеты focus-*)
 apps/    ui desktop web mobile                                                                     — клиенты Dioxus (пакеты ui, desktop, web, mobile)
-bin/     focus-flow                                                                                — CLI: serve | ui
+bin/     focus-flow                                                                                — CLI: serve | ui | token
 ```
 
 ## Владение кодом (две параллельные сессии)

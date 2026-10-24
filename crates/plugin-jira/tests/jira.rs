@@ -307,9 +307,14 @@ async fn import_with_field_autodiscovery() {
     Mock::given(method("GET"))
         .and(path("/rest/api/2/field"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {"id": "summary", "name": "Summary"},
-            {"id": "customfield_10200", "name": "Smart Checklist Progress"},
-            {"id": FIELD, "name": "Smart Checklist"},
+            {"id": "summary", "name": "Summary", "schema": {"type": "string", "system": "summary"}},
+            {"id": "customfield_10200", "name": "Smart Checklist Progress", "schema": {"type": "string"}},
+            // Smart Checklist для Data Center: поле для JQL, не текст.
+            {"id": "customfield_10300", "name": "Smart Checklist", "schema": {"type": "array", "items": "string"}},
+            {"id": FIELD, "name": "Checklists", "schema": {
+                "type": "string",
+                "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea"
+            }},
         ])))
         .expect(1)
         .mount(&e.jira)
@@ -380,6 +385,35 @@ async fn import_with_field_autodiscovery() {
         matches!(err, focus_core::CoreError::Validation(_)),
         "{err:?}"
     );
+}
+
+/// Поле, заданное вручную, — не текст (поле «Smart Checklist» у Data
+/// Center): импорт падает с понятной подсказкой, а не с «неожиданным ответом».
+#[tokio::test]
+async fn non_text_checklist_field_is_explained() {
+    let e = env().await;
+    e.configure(json!({"checklist_field_id": "customfield_11600"}))
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/issue/ABC-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "key": "ABC-1",
+            "fields": {
+                "summary": "Отчёт по тестированию",
+                "customfield_11600": [
+                    "Checklist(id=184286, issueId=260721, _items=[Item(id=15355, checklistId=184286)])"
+                ]
+            }
+        })))
+        .mount(&e.jira)
+        .await;
+    let err = e.app.service.import("ABC-1").await.unwrap_err();
+    let focus_core::CoreError::PluginUnavailable(text) = &err else {
+        panic!("{err:?}");
+    };
+    assert!(text.contains("customfield_11600"), "{text}");
+    assert!(text.contains("«Checklists»"), "{text}");
+    assert!(e.app.service.list_tasks().await.unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -327,7 +327,7 @@ pub fn Settings() -> Element {
                     }
                     FormRow {
                         label: "Поле чек-листа",
-                        hint: "Необязательно: id поля Smart Checklist. Пусто — плагин найдёт его сам по имени.",
+                        hint: "Необязательно: id текстового поля «Checklists» из Smart Checklist. Пусто — плагин найдёт его сам по имени.",
                         label { class: "field",
                             TextInput {
                                 reset: rev,

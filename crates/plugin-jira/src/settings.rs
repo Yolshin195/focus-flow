@@ -55,7 +55,7 @@ pub struct JiraSettings {
     /// Email учётной записи (только Cloud).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    /// Id поля Smart Checklist (`customfield_10100`); без него — автопоиск.
+    /// Id текстового поля чек-листа «Checklists» (`customfield_10100`); без него — автопоиск.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_field_id: Option<String>,
     /// Правила worklog.

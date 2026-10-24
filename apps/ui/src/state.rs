@@ -182,20 +182,20 @@ pub fn use_app_provider(preset: UiPreset) -> AppState {
     let api = use_api();
     let local_clock = api.is_remote();
     let state = use_context_provider(|| AppState {
-        status: Signal::new(None),
-        day: Signal::new(None),
-        tasks: Signal::new(Vec::new()),
-        error: Signal::new(None),
-        done_choice: Signal::new(preset == UiPreset::DoneChoice),
-        interrupt_dialog: Signal::new(preset == UiPreset::Interrupt),
-        picker_open: Signal::new(preset == UiPreset::Picker),
-        selected_item: Signal::new(None),
-        preset: Signal::new(preset),
-        busy: Signal::new(false),
-        conn: Signal::new(Conn::Unknown),
-        focus_requests: Signal::new(0),
-        base_status: Signal::new(None),
-        base_day: Signal::new(None),
+        status: root_signal(None),
+        day: root_signal(None),
+        tasks: root_signal(Vec::new()),
+        error: root_signal(None),
+        done_choice: root_signal(preset == UiPreset::DoneChoice),
+        interrupt_dialog: root_signal(preset == UiPreset::Interrupt),
+        picker_open: root_signal(preset == UiPreset::Picker),
+        selected_item: root_signal(None),
+        preset: root_signal(preset),
+        busy: root_signal(false),
+        conn: root_signal(Conn::Unknown),
+        focus_requests: root_signal(0),
+        base_status: root_signal(None),
+        base_day: root_signal(None),
         local_clock,
     });
     let platform = use_context::<PlatformHandle>();
@@ -250,6 +250,15 @@ pub fn use_app_provider(preset: UiPreset) -> AppState {
         }
     });
     state
+}
+
+/// Сигнал состояния с владельцем — корневым scope. Команды выполняются в
+/// `spawn_forever`, то есть тоже в корне: сигнал, которым владеет `App`,
+/// оттуда читался бы «выше» владельца, и Dioxus писал бы в лог
+/// предупреждение `copy_value_hoisted` на каждое чтение и запись.
+#[track_caller]
+fn root_signal<T: 'static>(value: T) -> Signal<T> {
+    Signal::new_in_scope(value, ScopeId::ROOT)
 }
 
 /// Один опрос статуса и дня. Ошибку связи показывает плашка, а не тост.

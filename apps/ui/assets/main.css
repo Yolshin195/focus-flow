@@ -1136,131 +1136,355 @@ kbd {
   border: 1px solid var(--line);
 }
 
-.task-loose .items {
-  padding: 0 var(--sp-3) var(--sp-3) var(--sp-3);
-}
-
-.task-loose .task-head {
-  padding-left: var(--sp-4);
-}
-
-.task-loose .task-title {
-  color: var(--text-2);
-  font-weight: 500;
-  font-size: var(--fs-md);
-}
-
+/* Шапка задачи: кольцо прогресса — в одной колонке с отметками пунктов. */
 .task-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+  padding: var(--sp-2) var(--sp-2) var(--sp-1) var(--sp-1);
+}
+
+.task-ring {
+  display: grid;
+  place-items: center;
+  height: 30px;
+}
+
+.ring-mini-track,
+.ring-mini-arc,
+.ring-mini-check {
+  fill: none;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ring-mini-track {
+  stroke: var(--surface-3);
+}
+
+.ring-mini-arc,
+.ring-mini-check {
+  stroke: var(--rest);
+}
+
+.ring-mini-check {
+  stroke-width: 1.8;
+}
+
+.task-main {
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-2);
-}
-
-.caret .icon {
-  transition: transform var(--t-med) var(--ease);
-}
-
-.caret.collapsed .icon {
-  transform: rotate(-90deg);
-}
-
-.task-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex: 1;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  padding-top: 4px;
+}
+
+.task-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  text-align: left;
+  border-radius: var(--r-xs);
 }
 
 .task-title {
+  min-width: 0;
   font-size: var(--fs-lg);
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .task.done .task-title {
   color: var(--text-3);
 }
 
-.task-count {
+.task-caret,
+.fold-caret {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-3);
+}
+
+.task-caret {
+  height: 22px;
+}
+
+.task-caret .icon,
+.fold-caret .icon {
+  transition: transform var(--t-med) var(--ease);
+}
+
+.task-caret.collapsed .icon,
+.fold-caret.collapsed .icon {
+  transform: rotate(-90deg);
+}
+
+.task-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--sp-2);
+  padding-bottom: var(--sp-1);
   font-size: var(--fs-xs);
   color: var(--text-3);
-  padding: 0 var(--sp-2);
 }
 
-.items {
-  padding: 0 var(--sp-3) var(--sp-3) 46px;
+.task-sub .num {
+  color: var(--text-2);
+}
+
+.task-loose-title {
+  padding: var(--sp-3) var(--sp-4) var(--sp-1);
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+/* Меню «⋯» задачи */
+.task-menu {
+  position: relative;
+}
+
+.task-more {
+  width: 36px;
+  height: 36px;
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  cursor: default;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 26;
   display: flex;
   flex-direction: column;
+  min-width: 200px;
+  padding: var(--sp-1);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-float);
+  animation: rise var(--t-fast) var(--ease);
 }
 
-.item-row {
+.menu-item {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   min-height: 40px;
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-3);
   border-radius: var(--r-sm);
-  border-top: 1px solid var(--line);
-}
-
-.item-row:first-child {
-  border-top-color: transparent;
-}
-
-.item-row:hover {
-  background: var(--surface-2);
-}
-
-.item-row-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: var(--fs-md);
+  text-decoration: none;
   white-space: nowrap;
 }
 
-.item-row.done .item-row-title {
-  color: var(--text-3);
-  text-decoration: line-through;
-  text-decoration-color: rgba(108, 115, 128, 0.6);
+.menu-item:hover {
+  background: #2b313b;
 }
 
-.item-row .take {
-  color: var(--text-3);
+/* Пункты: [отметка 44] [текст] [▶ 44]; разделитель — от колонки текста. */
+.items {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--sp-1) var(--sp-1);
 }
 
-.item-row:hover .take:not(:disabled) {
-  color: var(--work);
-  background: var(--work-soft);
+.item-row,
+.item-add-btn,
+.fold {
+  position: relative;
+  border-radius: var(--r-md);
 }
 
-.item-row .take:disabled {
-  opacity: 0;
+.items > .item-row:not(:first-child)::before,
+.items > .item-add-btn:not(:first-child)::before,
+.items > .fold:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 44px;
+  right: var(--sp-2);
+  border-top: 1px solid var(--line);
 }
 
-.item-row:hover .take:disabled {
-  opacity: 0.38;
+.item-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: start;
 }
 
 .item-row.in-work {
   background: var(--work-soft);
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  padding: 0 var(--sp-2);
+.check-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
 }
 
-.badge-work {
+.check-btn:hover .check {
+  border-color: var(--text-2);
+}
+
+/* Первая строка текста — по центру отметки и ▶ (11 + 22 / 2 = 22). */
+.item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 11px var(--sp-1) 11px 0;
+}
+
+.item-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  border-radius: var(--r-xs);
+  color: var(--text);
+  line-height: 22px;
+  text-align: left;
+}
+
+.item-text.expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.item-row.done .item-text {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: rgba(108, 115, 128, 0.6);
+}
+
+.item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.item-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--work);
+}
+
+.item-live {
   color: var(--work);
+  font-weight: 500;
+}
+
+.item-today {
+  color: var(--planning);
+}
+
+.item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0 0 calc(-1 * var(--sp-3));
+}
+
+.play,
+.play-slot {
+  width: 44px;
+  height: 44px;
+}
+
+.play {
+  display: grid;
+  place-items: center;
+}
+
+.play-dot {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--work);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.play-dot .icon path {
+  fill: currentColor;
+}
+
+.play:disabled .play-dot {
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0.5;
+}
+
+.item-add-btn,
+.fold {
+  display: grid;
+  grid-template-columns: 44px auto;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  color: var(--text-3);
+}
+
+.item-add-btn {
+  min-height: 44px;
+}
+
+.item-add-icon {
+  display: grid;
+  place-items: center;
+}
+
+.fold {
+  min-height: 40px;
+  font-size: var(--fs-sm);
+}
+
+@media (hover: hover) {
+  .item-row:not(.in-work):hover,
+  .item-add-btn:hover {
+    background: var(--surface-2);
+  }
+
+  .item-add-btn:hover,
+  .fold:hover {
+    color: var(--text-2);
+  }
+
+  .item-row:hover .play:not(:disabled) .play-dot,
+  .play:hover:not(:disabled) .play-dot {
+    background: var(--work-soft);
+  }
 }
 
 .pulse {
@@ -1297,12 +1521,12 @@ kbd {
 }
 
 .item-add {
-  padding: var(--sp-1) 0 0;
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) 44px;
 }
 
 .inline-input {
   width: 100%;
-  height: 38px;
+  height: 40px;
   padding: 0 var(--sp-3);
   border-radius: var(--r-sm);
   background: var(--bg);
@@ -1312,13 +1536,6 @@ kbd {
 
 .inline-input:focus {
   border-color: rgba(233, 235, 239, 0.35);
-}
-
-.items-empty {
-  margin: 0;
-  padding: var(--sp-2);
-  color: var(--text-3);
-  font-size: var(--fs-sm);
 }
 
 /* День */
@@ -2293,16 +2510,6 @@ kbd {
 
 /* Касание пальцем: зона нажатия не меньше 44 px, видимые размеры прежние. */
 @media (pointer: coarse) {
-  .check {
-    position: relative;
-  }
-
-  .check::after {
-    content: "";
-    position: absolute;
-    inset: -13px;
-  }
-
   .icon-btn {
     width: 40px;
     height: 40px;
@@ -2418,8 +2625,8 @@ kbd {
     grid-column: 1;
   }
 
-  .items {
-    padding: 0 var(--sp-2) var(--sp-2) var(--sp-8);
+  .item-text {
+    font-size: var(--fs-lg);
   }
 
   /* День: детали сессии — лист над вкладками */

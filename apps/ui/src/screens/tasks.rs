@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use dioxus::prelude::*;
+use focus_api_types::chrono::Utc;
 use focus_api_types::{ActiveSession, ApiError, NewTask, TaskDto, TaskId, TaskStatus};
 
 use crate::api::jira_key;
@@ -188,13 +189,12 @@ pub fn Tasks() -> Element {
                 }
                 if !loose.is_empty() {
                     div { class: "task task-loose",
-                        div { class: "task-head",
-                            span { class: "task-title", "Без задачи" }
-                        }
+                        div { class: "task-loose-title", "Без задачи" }
                         div { class: "items",
-                            for item in loose.iter().cloned() {
+                            for item in loose.iter().filter(|t| !is_done(t)).cloned() {
                                 ItemRow { key: "{item.id}", item, loose: true }
                             }
+                            DoneFold { items: loose.iter().filter(|t| is_done(t)).cloned().collect::<Vec<_>>(), loose: true }
                         }
                     }
                 }
@@ -203,6 +203,8 @@ pub fn Tasks() -> Element {
     }
 }
 
+/// Задача: кольцо прогресса, название (нажатие сворачивает), открытые пункты,
+/// «Добавить пункт» последней строкой, готовые — свёрнуты.
 #[component]
 fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
     let api = use_api();
@@ -217,6 +219,34 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
     let done = is_done(&task);
     let total = task.children.len();
     let closed = task.children.iter().filter(|c| is_done(c)).count();
+    let open: Vec<TaskDto> = task
+        .children
+        .iter()
+        .filter(|c| !is_done(c))
+        .cloned()
+        .collect();
+    let finished: Vec<TaskDto> = task
+        .children
+        .iter()
+        .filter(|c| is_done(c))
+        .cloned()
+        .collect();
+    let left = open.len();
+    let intervals: u32 = open.iter().filter_map(|c| c.estimate_intervals).sum();
+    let summary = if done {
+        "задача закрыта".to_string()
+    } else if left == 0 {
+        "все пункты готовы".to_string()
+    } else {
+        let mut s = format!(
+            "осталось {left} {}",
+            fmt::plural(left, "пункт", "пункта", "пунктов")
+        );
+        if intervals > 0 {
+            s.push_str(&format!(" · ≈ {intervals} × 50 мин"));
+        }
+        s
+    };
 
     let api_add = api.clone();
     let mut add = move || {
@@ -235,53 +265,47 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
             },
         );
     };
-    let api_done = api.clone();
 
     rsx! {
         div { class: if done { "task done" } else { "task" },
             div { class: "task-head",
-                button {
-                    class: if is_collapsed { "icon-btn caret collapsed" } else { "icon-btn caret" },
-                    "aria-label": if is_collapsed { "Развернуть" } else { "Свернуть" },
-                    "aria-expanded": "{!is_collapsed}",
-                    onclick: move |_| {
-                        let mut set = collapsed.write();
-                        if !set.remove(&id) {
-                            set.insert(id);
+                span { class: "task-ring", title: "Готово {closed} из {total}",
+                    ProgressRing { done: closed, total }
+                }
+                div { class: "task-main",
+                    button {
+                        class: "task-toggle",
+                        "aria-expanded": "{!is_collapsed}",
+                        title: if is_collapsed { "Развернуть" } else { "Свернуть" },
+                        onclick: move |_| {
+                            let mut set = collapsed.write();
+                            if !set.remove(&id) {
+                                set.insert(id);
+                            }
+                        },
+                        span { class: "task-title", "{task.title}" }
+                        span { class: if is_collapsed { "task-caret collapsed" } else { "task-caret" },
+                            {Icon::Chevron.render(14)}
                         }
-                    },
-                    {Icon::Chevron.render(16)}
-                }
-                Checkbox {
-                    checked: done,
-                    label: task.title.clone(),
-                    on_toggle: move |v| run(api_done.clone(), app, Command::SetDone(id, v), || {}),
-                }
-                div { class: "task-title-wrap",
-                    span { class: "task-title", "{task.title}" }
-                    if let (Some(k), Some(url)) = (&key, &task.external_url) {
-                        a { class: "chip chip-jira chip-link", href: "{url}", target: "_blank", title: "Открыть в Jira",
-                            "{k}"
-                            {Icon::External.render(12)}
+                    }
+                    div { class: "task-sub",
+                        if let (Some(k), Some(url)) = (&key, &task.external_url) {
+                            a { class: "chip chip-jira chip-link", href: "{url}", target: "_blank", title: "Открыть в Jira",
+                                "{k}"
+                                {Icon::External.render(12)}
+                            }
+                        }
+                        span {
+                            span { class: "num", "{closed} из {total}" }
+                            " · {summary}"
                         }
                     }
                 }
-                if total > 0 {
-                    span { class: "task-count num", "{closed}/{total}" }
-                }
-                button {
-                    class: "btn btn-ghost btn-small",
-                    onclick: move |_| {
-                        adding.set(true);
-                        collapsed.write().remove(&id);
-                    },
-                    {Icon::Plus.render(14)}
-                    "Пункт"
-                }
+                TaskMenu { id, done, url: task.external_url.clone() }
             }
             if !is_collapsed {
                 div { class: "items",
-                    for item in task.children.iter().cloned() {
+                    for item in open.iter().cloned() {
                         ItemRow { key: "{item.id}", item, loose: false }
                     }
                     if adding() {
@@ -309,8 +333,111 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
                                 },
                             }
                         }
-                    } else if total == 0 {
-                        p { class: "items-empty", "Пунктов нет. Разбей задачу на шаги по 50 минут." }
+                    } else if !done {
+                        button { class: "item-add-btn", onclick: move |_| adding.set(true),
+                            span { class: "item-add-icon", {Icon::Plus.render(16)} }
+                            "Добавить пункт"
+                        }
+                    }
+                    DoneFold { items: finished, loose: false }
+                }
+            }
+        }
+    }
+}
+
+/// Кольцо: доля готовых пунктов; всё готово — зелёное с галочкой.
+#[component]
+fn ProgressRing(done: usize, total: usize) -> Element {
+    const R: f64 = 8.0;
+    let len = 2.0 * std::f64::consts::PI * R;
+    let full = total > 0 && done >= total;
+    let arc = if total == 0 {
+        0.0
+    } else {
+        len * done as f64 / total as f64
+    };
+    rsx! {
+        svg {
+            class: if full { "ring-mini full" } else { "ring-mini" },
+            width: "22",
+            height: "22",
+            view_box: "0 0 22 22",
+            "aria-hidden": "true",
+            circle { class: "ring-mini-track", cx: "11", cy: "11", r: "{R}" }
+            if done > 0 {
+                circle {
+                    class: "ring-mini-arc",
+                    cx: "11",
+                    cy: "11",
+                    r: "{R}",
+                    stroke_dasharray: "{arc:.2} {len:.2}",
+                    transform: "rotate(-90 11 11)",
+                }
+            }
+            if full {
+                path { class: "ring-mini-check", d: "M7.6 11.2l2.2 2.2 4.4-4.6" }
+            }
+        }
+    }
+}
+
+/// Меню «⋯» задачи: закрыть или вернуть задачу, открыть в Jira.
+/// Закрыть задачу одним случайным касанием по кольцу больше нельзя.
+#[component]
+fn TaskMenu(id: TaskId, done: bool, url: Option<String>) -> Element {
+    let api = use_api();
+    let app = use_app();
+    let mut open = use_signal(|| false);
+    rsx! {
+        div { class: "task-menu",
+            button {
+                class: "icon-btn task-more",
+                "aria-label": "Действия с задачей",
+                "aria-haspopup": "menu",
+                "aria-expanded": "{open()}",
+                onclick: move |_| open.toggle(),
+                {Icon::More.render(18)}
+            }
+            if open() {
+                button {
+                    class: "menu-backdrop",
+                    tabindex: "-1",
+                    "aria-hidden": "true",
+                    onclick: move |_| open.set(false),
+                }
+                div {
+                    class: "menu",
+                    role: "menu",
+                    onkeydown: move |e: KeyboardEvent| {
+                        if e.key() == Key::Escape {
+                            open.set(false);
+                        }
+                    },
+                    button {
+                        class: "menu-item",
+                        role: "menuitem",
+                        // Фокус в меню: Esc закрывает, Tab идёт по пунктам.
+                        onmounted: move |e| async move {
+                            let _ = e.set_focus(true).await;
+                        },
+                        onclick: move |_| {
+                            open.set(false);
+                            run(api.clone(), app, Command::SetDone(id, !done), || {});
+                        },
+                        {Icon::Check.render(16)}
+                        if done { "Вернуть задачу" } else { "Закрыть задачу" }
+                    }
+                    if let Some(u) = url {
+                        a {
+                            class: "menu-item",
+                            role: "menuitem",
+                            href: "{u}",
+                            target: "_blank",
+                            onclick: move |_| open.set(false),
+                            {Icon::External.render(16)}
+                            "Открыть в Jira"
+                        }
                     }
                 }
             }
@@ -318,6 +445,32 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
     }
 }
 
+/// Готовые и отменённые пункты — свёрнуты в одну строку «Готово · N».
+#[component]
+fn DoneFold(items: Vec<TaskDto>, loose: bool) -> Element {
+    let mut shown = use_signal(|| false);
+    if items.is_empty() {
+        return rsx! {};
+    }
+    let n = items.len();
+    rsx! {
+        button {
+            class: "fold",
+            "aria-expanded": "{shown()}",
+            onclick: move |_| shown.toggle(),
+            span { class: if shown() { "fold-caret" } else { "fold-caret collapsed" }, {Icon::Chevron.render(14)} }
+            span { "Готово · " span { class: "num", "{n}" } }
+        }
+        if shown() {
+            for item in items.iter().cloned() {
+                ItemRow { key: "{item.id}", item, loose }
+            }
+        }
+    }
+}
+
+/// Пункт: отметка «готово», текст до трёх строк (нажатие показывает целиком),
+/// метаданные, если есть, и ▶ «Взять в работу».
 #[component]
 fn ItemRow(item: TaskDto, loose: bool) -> Element {
     let api = use_api();
@@ -330,6 +483,11 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
     let can_start = matches!(active, None | Some(ActiveSession::Planning { .. }));
     let api_done = api.clone();
     let api_start = api.clone();
+    let mut expanded = use_signal(|| false);
+    let estimate = item.estimate_intervals.filter(|n| *n > 0);
+    let today = item.planned_for == Some(fmt::local_date(Utc::now()));
+    let has_note = item.notes.as_deref().is_some_and(|n| !n.trim().is_empty());
+    let has_meta = in_work || estimate.is_some() || today || has_note;
     // Пункт без родителя можно разбить на пункты — тогда он станет задачей.
     let mut adding = use_signal(|| false);
     let mut draft = use_signal(String::new);
@@ -351,24 +509,76 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
             },
         );
     };
+    let row = if in_work {
+        "item-row in-work"
+    } else if done {
+        "item-row done"
+    } else {
+        "item-row"
+    };
 
     rsx! {
-        div {
-            class: if in_work { "item-row in-work" } else if done { "item-row done" } else { "item-row" },
-            class: if loose { "loose" },
+        div { class: row,
             Checkbox {
                 checked: done,
                 label: item.title.clone(),
                 on_toggle: move |v| run(api_done.clone(), app, Command::SetDone(id, v), || {}),
             }
-            span { class: "item-row-title", "{item.title}" }
-            if in_work {
-                span { class: "badge badge-work", span { class: "pulse" } "В работе" }
-            } else if !done {
+            div { class: "item-body",
                 button {
-                    class: "btn btn-ghost btn-small take",
+                    class: if expanded() { "item-text expanded" } else { "item-text" },
+                    "aria-expanded": "{expanded()}",
+                    onclick: move |_| expanded.toggle(),
+                    "{item.title}"
+                }
+                if has_meta {
+                    div { class: "item-meta",
+                        if in_work {
+                            span { class: "item-live", span { class: "pulse" } "В работе" }
+                        }
+                        if let Some(n) = estimate {
+                            span { class: "item-estimate", title: "Оценка: {n} × 50 минут",
+                                span { class: "dots", "aria-hidden": "true",
+                                    for k in 0..n.min(6) {
+                                        i { key: "{k}" }
+                                    }
+                                }
+                                span { class: "num", "{n} × 50 мин" }
+                            }
+                        }
+                        if today {
+                            span { class: "item-today", "сегодня" }
+                        }
+                        if has_note {
+                            span { class: "item-note", title: "{item.notes.clone().unwrap_or_default()}",
+                                {Icon::Note.render(13)}
+                                "заметка"
+                            }
+                        }
+                    }
+                }
+                if expanded() && loose && !done && !in_work && !adding() {
+                    div { class: "item-actions",
+                        button {
+                            class: "btn btn-ghost btn-small",
+                            title: "Пункт станет задачей",
+                            onclick: move |_| adding.set(true),
+                            {Icon::Plus.render(14)}
+                            "Разбить на пункты"
+                        }
+                    }
+                }
+            }
+            if in_work {
+                span { class: "play-slot", "aria-hidden": "true" }
+            } else if done {
+                span { class: "play-slot" }
+            } else {
+                button {
+                    class: "play",
                     disabled: !can_start || (app.busy)(),
-                    title: if can_start { "Начать 50 минут над этим пунктом" } else { "Сначала закончи текущую сессию" },
+                    title: if can_start { "Взять в работу — 50 минут" } else { "Сначала закончи текущую сессию" },
+                    "aria-label": "Взять в работу: {item.title}",
                     onclick: move |_| {
                         app.selected_item.set(Some(id));
                         let nav = nav;
@@ -377,17 +587,7 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
                             nav.push(Route::Focus {});
                         });
                     },
-                    {Icon::Play.render(12)}
-                    "Взять в работу"
-                }
-            }
-            if loose && !done && !in_work {
-                button {
-                    class: "btn btn-ghost btn-small take",
-                    title: "Разбить на пункты — станет задачей",
-                    onclick: move |_| adding.set(true),
-                    {Icon::Plus.render(12)}
-                    "Пункт"
+                    span { class: "play-dot", {Icon::Play.render(14)} }
                 }
             }
         }
@@ -420,17 +620,20 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
     }
 }
 
+/// Отметка «готово»: квадрат 18 px в зоне нажатия 44 px.
 #[component]
 fn Checkbox(checked: bool, label: String, on_toggle: EventHandler<bool>) -> Element {
     rsx! {
         button {
-            class: if checked { "check checked" } else { "check" },
+            class: "check-btn",
             role: "checkbox",
             "aria-checked": "{checked}",
             "aria-label": "Готово: {label}",
             onclick: move |_| on_toggle.call(!checked),
-            if checked {
-                {Icon::Check.render(14)}
+            span { class: if checked { "check checked" } else { "check" },
+                if checked {
+                    {Icon::Check.render(14)}
+                }
             }
         }
     }

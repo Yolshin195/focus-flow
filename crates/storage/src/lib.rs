@@ -22,7 +22,7 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use focus_core::{Clock, Ports, TaskSources};
+use focus_core::{Clock, NoPlugins, Ports, TaskSources};
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
@@ -98,7 +98,8 @@ impl Storage {
         self.pool.close().await;
     }
 
-    /// Порты ядра поверх этого хранилища.
+    /// Порты ядра поверх этого хранилища; плагинов нет ([`NoPlugins`]) —
+    /// реестр плагинов сервер подставляет сам (`ports.plugins`).
     pub fn ports(&self, clock: Arc<dyn Clock>, sources: Arc<dyn TaskSources>) -> Ports {
         let me = Arc::new(self.clone());
         Ports {
@@ -109,6 +110,7 @@ impl Storage {
             settings: me.clone(),
             events: me,
             sources,
+            plugins: Arc::new(NoPlugins),
         }
     }
 }

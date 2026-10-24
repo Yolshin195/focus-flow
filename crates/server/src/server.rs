@@ -1,4 +1,5 @@
-//! Запуск: Axum на адресе конфига, таймер, остановка по Ctrl+C / SIGTERM.
+//! Запуск: Axum на адресе конфига, таймер, воркер outbox, остановка по
+//! Ctrl+C / SIGTERM.
 
 use anyhow::Context as _;
 use std::sync::Arc;
@@ -9,23 +10,31 @@ use focus_api_rest::{Access, RestState};
 use crate::app::App;
 use crate::config::Config;
 use crate::notify::default_notifier;
+use crate::plugins::{OUTBOX_POLL, run_outbox_worker};
 use crate::timer::{POLL, run_timer};
 
-/// HTTP-роутер сервиса: REST + SSE (`/api/*`). Место для MCP (`/mcp`, шаг 6)
-/// и маршрутов плагинов (шаг 5) — здесь же, через `merge`.
+/// HTTP-роутер сервиса: REST + SSE (`/api/*`) и маршруты плагинов
+/// (`/api/plugins/<id>/…`) — за одними проверками `Host`/`Origin`/токена.
 pub fn router(app: &App) -> Router {
-    let access = Access {
+    let access = Arc::new(Access {
         token: app.token.to_string(),
         allowed_hosts: app.config.allowed_hosts.clone(),
         allowed_origins: app.config.allowed_origins.clone(),
-    };
+    });
     let rest = focus_api_rest::router(RestState {
         service: app.service.clone(),
         events: app.events.clone(),
-        access: Arc::new(access),
+        access: access.clone(),
         shutdown: app.shutdown.clone(),
     });
-    Router::new().merge(rest)
+    let plugins = app
+        .plugins
+        .routes()
+        .layer(axum::middleware::from_fn_with_state(
+            access,
+            focus_api_rest::guard::guard,
+        ));
+    Router::new().merge(rest).merge(plugins)
 }
 
 /// Запустить сервис и работать до Ctrl+C (или SIGTERM): открыть БД и токен,
@@ -50,6 +59,12 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         cancel.clone(),
     ));
 
+    let outbox = tokio::spawn(run_outbox_worker(
+        app.plugins.clone(),
+        OUTBOX_POLL,
+        cancel.clone(),
+    ));
+
     let shutdown = {
         let cancel = cancel.clone();
         async move {
@@ -66,6 +81,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     cancel.cancel();
     if let Err(e) = timer.await {
         tracing::error!(error = %e, "таймер завершился с ошибкой");
+    }
+    if let Err(e) = outbox.await {
+        tracing::error!(error = %e, "воркер outbox завершился с ошибкой");
     }
     app.storage.close().await;
     tracing::info!("сервис остановлен");

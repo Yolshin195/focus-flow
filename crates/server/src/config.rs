@@ -16,6 +16,8 @@ pub const DEFAULT_ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::
 const DB_FILE: &str = "focus.db";
 /// Имя файла токена в data dir.
 const TOKEN_FILE: &str = "token";
+/// Каталог секретов плагинов в data dir.
+const SECRETS_DIR: &str = "secrets";
 
 /// Конфигурация сервиса.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +84,11 @@ impl Config {
     /// Путь к файлу БД.
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join(DB_FILE)
+    }
+
+    /// Каталог секретов плагинов (`secrets/<id>/`, права `0700`/`0600`).
+    pub fn secrets_dir(&self) -> PathBuf {
+        self.data_dir.join(SECRETS_DIR)
     }
 
     /// Путь к файлу токена.

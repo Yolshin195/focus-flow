@@ -6,7 +6,7 @@ use std::time::Duration as StdDuration;
 
 use chrono::{Duration, TimeZone, Utc};
 use focus_api_types::{ActiveSession, EndReason, NewTask, ServerEvent, SessionKind};
-use focus_core::{ManualClock, NoTaskSources};
+use focus_core::ManualClock;
 use focus_server::{App, Config, Notifier, run_timer};
 use focus_storage::Storage;
 use tokio::sync::broadcast;
@@ -49,9 +49,11 @@ async fn timer_closes_work_then_rest() {
         Config::with_data_dir("/nonexistent"),
         storage,
         clock.clone(),
-        Arc::new(NoTaskSources),
+        Vec::new(),
         "t",
-    );
+    )
+    .await
+    .unwrap();
     let item = app
         .service
         .create_task(NewTask::new("пункт"))

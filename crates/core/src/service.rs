@@ -765,13 +765,15 @@ impl FocusService {
         check_range("daily_target_min", dto.daily_target_min, TARGET_MIN)?;
         let settings = Settings::from(dto);
         self.p.settings.save(&settings).await?;
+        // Включение/выключение плагинов — сразу, без перезапуска.
+        self.p.plugins.settings_changed(&settings).await?;
         Ok(settings.into())
     }
 
-    /// `GET /api/plugins/status`. Плагинов в ядре нет — пусто; настоящее
-    /// состояние собирает `focus-server` (шаг 5).
+    /// `GET /api/plugins/status`: состояние плагинов и их очередей outbox
+    /// (порт [`crate::PluginHost`]; без плагинов — пусто).
     pub async fn plugin_status(&self) -> CoreResult<Vec<PluginStatusDto>> {
-        Ok(Vec::new())
+        self.p.plugins.status().await
     }
 }
 

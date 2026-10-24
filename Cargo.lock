@@ -2233,6 +2233,18 @@ dependencies = [
 [[package]]
 name = "focus-plugin-api"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "focus-api-types",
+ "focus-core",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "focus-plugin-jira"
@@ -2243,18 +2255,25 @@ name = "focus-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "directories",
  "focus-api-rest",
  "focus-api-types",
  "focus-core",
+ "focus-plugin-api",
+ "focus-plugin-jira",
  "focus-storage",
  "getrandom 0.3.4",
+ "http-body-util",
  "notify-rust",
+ "serde_json",
+ "sqlx",
  "tempfile",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
 ]
 

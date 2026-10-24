@@ -14,6 +14,11 @@ use focus_core::{
 };
 use focus_storage::Storage;
 
+/// Подписчики outbox в тесте очереди.
+fn ab() -> Vec<String> {
+    vec!["a".into(), "b".into()]
+}
+
 fn t0() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 24, 9, 0, 0).unwrap()
 }
@@ -245,14 +250,14 @@ async fn outbox_lifecycle() {
 
     // Без подписчиков событие никуда не пишется.
     st.publish(std::slice::from_ref(&ev)).await.unwrap();
-    assert!(st.fetch_due(now, 10).await.unwrap().is_empty());
+    assert!(st.fetch_due(now, &ab(), 10).await.unwrap().is_empty());
     assert!(st.stats().await.unwrap().is_empty());
 
     st.set_subscribers(&["a".into(), "b".into()]).await.unwrap();
     st.publish(&[ev.clone(), DomainEvent::Unknown])
         .await
         .unwrap();
-    let due = st.fetch_due(now, 10).await.unwrap();
+    let due = st.fetch_due(now, &ab(), 10).await.unwrap();
     let got: Vec<_> = due
         .iter()
         .map(|e| (e.plugin_id.as_str(), e.event.name()))
@@ -267,14 +272,14 @@ async fn outbox_lifecycle() {
         ]
     );
     assert_eq!(due[0].event, ev);
-    assert_eq!(st.fetch_due(now, 3).await.unwrap().len(), 3);
+    assert_eq!(st.fetch_due(now, &ab(), 3).await.unwrap().len(), 3);
 
     // Неудача у «a»: задержка 10 с, потом 20 с; очередь «a» ждёт по порядку.
     let a1 = due[0].id;
     let next = st.mark_failed(a1, "сеть", now).await.unwrap();
     assert_eq!(next, now + Duration::seconds(10));
     let ids: Vec<_> = st
-        .fetch_due(now, 10)
+        .fetch_due(now, &ab(), 10)
         .await
         .unwrap()
         .iter()
@@ -289,7 +294,7 @@ async fn outbox_lifecycle() {
     assert_eq!(stats[0].last_error_at, Some(now));
     assert_eq!(stats[1].last_error, None);
 
-    let retry = st.fetch_due(next, 10).await.unwrap();
+    let retry = st.fetch_due(next, &ab(), 10).await.unwrap();
     assert_eq!(retry[0].id, a1);
     assert_eq!(retry[0].attempts, 1);
     assert_eq!(retry[0].last_error.as_deref(), Some("сеть"));
@@ -297,11 +302,11 @@ async fn outbox_lifecycle() {
     assert_eq!(next2, next + Duration::seconds(20));
 
     // Доставка всего.
-    for e in st.fetch_due(next2, 10).await.unwrap() {
+    for e in st.fetch_due(next2, &ab(), 10).await.unwrap() {
         st.mark_done(e.id, next2).await.unwrap();
     }
     assert!(
-        st.fetch_due(next2 + Duration::days(1), 10)
+        st.fetch_due(next2 + Duration::days(1), &ab(), 10)
             .await
             .unwrap()
             .is_empty()

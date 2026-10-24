@@ -394,13 +394,18 @@ impl Storage {
     async fn outbox_due(
         &self,
         now: DateTime<Utc>,
+        plugin_ids: &[String],
         limit: usize,
     ) -> StorageResult<Vec<OutboxEntry>> {
+        if plugin_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         // Как `focus_core::outbox::select_due`: ждущие и наступившие, но не
         // те, перед которыми у того же плагина есть ещё не наступившая запись.
         let sql = format!(
             "SELECT {OUTBOX_COLS} FROM outbox o
              WHERE o.done_at IS NULL
+               AND o.plugin_id IN (SELECT value FROM json_each(?3))
                AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= ?1)
                AND NOT EXISTS (
                    SELECT 1 FROM outbox p
@@ -413,6 +418,7 @@ impl Storage {
         sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(ts(now))
             .bind(limit)
+            .bind(serde_json::to_string(plugin_ids)?)
             .fetch_all(&self.pool)
             .await?
             .iter()
@@ -501,8 +507,13 @@ impl Outbox for Storage {
         Ok(())
     }
 
-    async fn fetch_due(&self, now: DateTime<Utc>, limit: usize) -> CoreResult<Vec<OutboxEntry>> {
-        Ok(self.outbox_due(now, limit).await?)
+    async fn fetch_due(
+        &self,
+        now: DateTime<Utc>,
+        plugin_ids: &[String],
+        limit: usize,
+    ) -> CoreResult<Vec<OutboxEntry>> {
+        Ok(self.outbox_due(now, plugin_ids, limit).await?)
     }
 
     async fn mark_done(&self, id: OutboxId, now: DateTime<Utc>) -> CoreResult<()> {

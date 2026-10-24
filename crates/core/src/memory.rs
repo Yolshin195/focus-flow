@@ -14,8 +14,8 @@ use crate::error::{CoreError, CoreResult};
 use crate::events::DomainEvent;
 use crate::outbox::{OutboxEntry, OutboxId, OutboxStats, select_due};
 use crate::ports::{
-    DayRepo, EventSink, NoTaskSources, Outbox, Ports, SessionRepo, SettingsRepo, TaskRepo,
-    TaskSources,
+    DayRepo, EventSink, NoPlugins, NoTaskSources, Outbox, Ports, SessionRepo, SettingsRepo,
+    TaskRepo, TaskSources,
 };
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -191,8 +191,13 @@ impl Outbox for MemoryOutbox {
         Ok(())
     }
 
-    async fn fetch_due(&self, now: DateTime<Utc>, limit: usize) -> CoreResult<Vec<OutboxEntry>> {
-        Ok(select_due(&lock(&self.0).entries, now, limit))
+    async fn fetch_due(
+        &self,
+        now: DateTime<Utc>,
+        plugin_ids: &[String],
+        limit: usize,
+    ) -> CoreResult<Vec<OutboxEntry>> {
+        Ok(select_due(&lock(&self.0).entries, now, plugin_ids, limit))
     }
 
     async fn mark_done(&self, id: OutboxId, now: DateTime<Utc>) -> CoreResult<()> {
@@ -284,6 +289,7 @@ impl MemoryStore {
             settings: self.settings.clone(),
             events: self.outbox.clone(),
             sources,
+            plugins: Arc::new(NoPlugins),
         }
     }
 }
@@ -299,27 +305,28 @@ mod tests {
     fn memory_outbox_lifecycle() {
         let now = Utc.with_ymd_and_hms(2026, 10, 24, 9, 0, 0).unwrap();
         let ob = MemoryOutbox::default();
+        let j = ["jira".to_owned()];
         block_on(ob.publish(&[DomainEvent::Unknown])).unwrap();
-        assert!(block_on(ob.fetch_due(now, 10)).unwrap().is_empty());
+        assert!(block_on(ob.fetch_due(now, &j, 10)).unwrap().is_empty());
 
         block_on(ob.set_subscribers(&["jira".into()])).unwrap();
         block_on(ob.publish(&[DomainEvent::Unknown, DomainEvent::Unknown])).unwrap();
-        let due = block_on(ob.fetch_due(now, 10)).unwrap();
+        let due = block_on(ob.fetch_due(now, &j, 10)).unwrap();
         assert_eq!(due.len(), 2);
 
         let next = block_on(ob.mark_failed(due[0].id, "сеть", now)).unwrap();
         assert_eq!(next, now + Duration::seconds(10));
         // Первая ждёт повтора — вторая того же плагина тоже ждёт.
-        assert!(block_on(ob.fetch_due(now, 10)).unwrap().is_empty());
+        assert!(block_on(ob.fetch_due(now, &j, 10)).unwrap().is_empty());
         let st = block_on(ob.stats()).unwrap();
         assert_eq!(st[0].pending, 2);
         assert_eq!(st[0].last_error.as_deref(), Some("сеть"));
 
-        let due = block_on(ob.fetch_due(next, 10)).unwrap();
+        let due = block_on(ob.fetch_due(next, &j, 10)).unwrap();
         assert_eq!(due[0].attempts, 1);
         block_on(ob.mark_done(due[0].id, next)).unwrap();
         block_on(ob.mark_done(due[1].id, next)).unwrap();
-        assert!(block_on(ob.fetch_due(next, 10)).unwrap().is_empty());
+        assert!(block_on(ob.fetch_due(next, &j, 10)).unwrap().is_empty());
         assert_eq!(block_on(ob.stats()).unwrap()[0].pending, 0);
         assert_eq!(ob.events().len(), 3);
     }

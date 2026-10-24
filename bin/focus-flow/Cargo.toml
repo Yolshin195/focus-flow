@@ -6,9 +6,11 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["notify"]
+default = ["notify", "jira"]
 # Системные уведомления сервиса (см. focus-server).
 notify = ["focus-server/notify"]
+# Плагин Jira.
+jira = ["focus-server/jira"]
 
 [dependencies]
 anyhow = { workspace = true }

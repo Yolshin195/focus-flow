@@ -77,15 +77,20 @@ pub fn backoff(attempts: u32) -> Duration {
     Duration::seconds(sec.min(BACKOFF_MAX_SEC))
 }
 
-/// Записи, которые воркер может доставлять в момент `now`: ждущие и
-/// наступившие, в порядке id. Порядок по плагину сохраняется: записи плагина
-/// после ещё не наступившей (ждущей повтора) не возвращаются. Не больше `limit`.
+/// Записи плагинов `plugin_ids`, которые воркер может доставлять в момент
+/// `now`: ждущие и наступившие, в порядке id. Порядок по плагину
+/// сохраняется: записи плагина после ещё не наступившей (ждущей повтора) не
+/// возвращаются. Не больше `limit`.
 pub fn select_due<'a>(
     entries: impl IntoIterator<Item = &'a OutboxEntry>,
     now: DateTime<Utc>,
+    plugin_ids: &[String],
     limit: usize,
 ) -> Vec<OutboxEntry> {
-    let mut sorted: Vec<&OutboxEntry> = entries.into_iter().filter(|e| e.is_pending()).collect();
+    let mut sorted: Vec<&OutboxEntry> = entries
+        .into_iter()
+        .filter(|e| e.is_pending() && plugin_ids.contains(&e.plugin_id))
+        .collect();
     sorted.sort_by_key(|e| e.id);
     let mut blocked = std::collections::BTreeSet::new();
     let mut out = Vec::new();
@@ -139,9 +144,24 @@ mod tests {
             e(3, "a", None),
             e(4, "b", Some(-1)),
         ];
-        let ids: Vec<_> = select_due(&all, now, 10).iter().map(|x| x.id).collect();
+        let ab = ["a".to_owned(), "b".to_owned()];
+        let ids: Vec<_> = select_due(&all, now, &ab, 10)
+            .iter()
+            .map(|x| x.id)
+            .collect();
         assert_eq!(ids, [2, 4]);
-        let ids: Vec<_> = select_due(&all, now, 1).iter().map(|x| x.id).collect();
+        let ids: Vec<_> = select_due(&all, now, &ab, 1).iter().map(|x| x.id).collect();
         assert_eq!(ids, [2]);
+        // Только «a»: 1 ждёт повтора и блокирует 3.
+        let ids: Vec<_> = select_due(&all, now, &ab[..1], 10)
+            .iter()
+            .map(|x| x.id)
+            .collect();
+        assert!(ids.is_empty());
+        let ids: Vec<_> = select_due(&all, now, &ab[1..], 10)
+            .iter()
+            .map(|x| x.id)
+            .collect();
+        assert_eq!(ids, [2, 4]);
     }
 }

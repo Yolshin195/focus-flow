@@ -24,7 +24,7 @@ pub use error::{CoreError, CoreResult};
 pub use events::DomainEvent;
 pub use outbox::{OutboxEntry, OutboxId, OutboxStats};
 pub use ports::{
-    DayRepo, EventSink, NoTaskSources, Outbox, Ports, SessionRepo, SettingsRepo, TaskRepo,
-    TaskSources,
+    DayRepo, EventSink, NoPlugins, NoTaskSources, Outbox, PluginHost, Ports, SessionRepo,
+    SettingsRepo, TaskRepo, TaskSources,
 };
 pub use service::{FocusService, session_dto};

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use focus_api_types::{DayId, SessionId, TaskId};
+use focus_api_types::{DayId, PluginStatusDto, SessionId, TaskId};
 
 use crate::clock::Clock;
 use crate::domain::{ImportedTask, Session, Settings, Task, WorkDay};
@@ -80,9 +80,16 @@ pub trait EventSink: Send + Sync {
 pub trait Outbox: EventSink {
     /// Задать подписчиков (id включённых плагинов) для новых публикаций.
     async fn set_subscribers(&self, plugin_ids: &[String]) -> CoreResult<()>;
-    /// Записи, готовые к доставке в момент `now`, в порядке публикации; по
-    /// каждому плагину порядок сохраняется (см. [`crate::outbox::select_due`]).
-    async fn fetch_due(&self, now: DateTime<Utc>, limit: usize) -> CoreResult<Vec<OutboxEntry>>;
+    /// Записи плагинов `plugin_ids`, готовые к доставке в момент `now`, в
+    /// порядке публикации; по каждому плагину порядок сохраняется (см.
+    /// [`crate::outbox::select_due`]). Записи других плагинов (выключенных)
+    /// не возвращаются и не мешают.
+    async fn fetch_due(
+        &self,
+        now: DateTime<Utc>,
+        plugin_ids: &[String],
+        limit: usize,
+    ) -> CoreResult<Vec<OutboxEntry>>;
     /// Запись доставлена.
     async fn mark_done(&self, id: OutboxId, now: DateTime<Utc>) -> CoreResult<()>;
     /// Доставка не удалась: `attempts + 1`, ошибка и следующая попытка через
@@ -118,6 +125,32 @@ impl TaskSources for NoTaskSources {
     }
 }
 
+/// Плагины глазами ядра: состояние для `GET /api/plugins/status` и реакция
+/// на смену настроек (включение/выключение). Реализует реестр плагинов в
+/// `focus-server`.
+#[async_trait]
+pub trait PluginHost: Send + Sync {
+    /// Состояние плагинов и их очередей outbox.
+    async fn status(&self) -> CoreResult<Vec<PluginStatusDto>>;
+    /// Настройки сохранены (`PUT /api/settings`): применить включение
+    /// плагинов. Вызывается после записи настроек.
+    async fn settings_changed(&self, settings: &Settings) -> CoreResult<()>;
+}
+
+/// Без плагинов: пустой статус, настройки ни на что не влияют.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoPlugins;
+
+#[async_trait]
+impl PluginHost for NoPlugins {
+    async fn status(&self) -> CoreResult<Vec<PluginStatusDto>> {
+        Ok(Vec::new())
+    }
+    async fn settings_changed(&self, _settings: &Settings) -> CoreResult<()> {
+        Ok(())
+    }
+}
+
 /// Набор портов, из которого собирается [`crate::FocusService`].
 #[derive(Clone)]
 pub struct Ports {
@@ -135,4 +168,6 @@ pub struct Ports {
     pub events: Arc<dyn EventSink>,
     /// Источники задач для импорта.
     pub sources: Arc<dyn TaskSources>,
+    /// Плагины (статус, реакция на настройки).
+    pub plugins: Arc<dyn PluginHost>,
 }

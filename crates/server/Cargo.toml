@@ -10,21 +10,30 @@ default = ["notify"]
 # Системные уведомления (`notify-rust`). Без фичи — только запись в лог
 # (headless, CI).
 notify = ["dep:notify-rust"]
+# Плагин Jira (шаг 7; пока крейт-заготовка).
+jira = ["dep:focus-plugin-jira"]
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
 focus-api-rest = { workspace = true }
 focus-api-types = { workspace = true }
 focus-core = { workspace = true }
+focus-plugin-api = { workspace = true }
+focus-plugin-jira = { workspace = true, optional = true }
 focus-storage = { workspace = true }
 getrandom = { workspace = true }
 notify-rust = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net"] }
+serde_json = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+http-body-util = { workspace = true }
+sqlx = { workspace = true }
 tempfile = { workspace = true }
+tower = { workspace = true }

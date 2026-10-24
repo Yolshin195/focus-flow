@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 ui = { workspace = true }
+notify-rust = "4.11.7"
 
 [features]
 default = ["desktop"]
 desktop = ["dioxus/desktop"]
-

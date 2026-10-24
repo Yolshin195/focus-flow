@@ -1,15 +1,22 @@
-# UI
+# ui — общий интерфейс Focus Flow
 
-This crate contains all shared components for the workspace. This is a great place to place any UI you would like to use in multiple platforms like a common `Button` or `Navbar` component.
+Маршруты, экраны, компоненты и тема для всех платформ. Платформенных зависимостей нет.
 
 ```
 ui/
-├─ src/
-│  ├─ lib.rs # The entrypoint for the ui crate
-│  ├─ hero.rs # The Hero component that will be used in every platform
-│  ├─ navbar.rs # The Navbar component that will be used in the layout of every platform's router
+├─ assets/
+│  ├─ fonts/          # Inter и JetBrains Mono (woff2, OFL) — в комплекте, без сети
+│  ├─ tokens.css      # дизайн-токены
+│  └─ main.css        # стили экранов
+└─ src/
+   ├─ lib.rs          # App, enum Route
+   ├─ platform.rs     # трейт Platform (уведомления, wake lock, адрес сервиса)
+   ├─ state.rs        # общее состояние, опрос статуса раз в секунду, команды
+   ├─ fonts.rs        # @font-face для шрифтов из assets/fonts
+   ├─ fmt.rs          # форматирование времени
+   ├─ api/mock.rs     # MockApi — FocusApi в памяти с живым таймером и демо-днём
+   ├─ screens/        # focus.rs, tasks.rs, day.rs
+   └─ components/     # ring, picker, dialog, norm_bar, icons
 ```
 
-## Dependencies
-
-Since this crate is shared between multiple platforms, it should not pull in any platform specific dependencies. For example, if you want to use the `web_sys` crate in the web build of your app, you should not add it to this crate. Instead, you should add platform specific dependencies to the [web](../web/Cargo.toml), [desktop](../desktop/Cargo.toml), or [mobile](../mobile/Cargo.toml) crates.
+`cargo test -p ui` гоняет сценарии `focus-api-contract-tests` на `MockApi`.

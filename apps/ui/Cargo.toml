@@ -4,5 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dioxus = { workspace = true }
+dioxus = { workspace = true, features = ["router"] }
+focus-api-types = { workspace = true }
+# Нужен для `impl FocusApi` (трейт объявлен через `#[async_trait(?Send)]`).
+async-trait = "0.1.89"
+# Таймер для опроса статуса: один и тот же код на desktop и в wasm.
+futures-timer = "3.0.3"
 
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+futures-timer = { version = "3.0.3", features = ["wasm-bindgen"] }
+
+[dev-dependencies]
+focus-api-contract-tests = { workspace = true }

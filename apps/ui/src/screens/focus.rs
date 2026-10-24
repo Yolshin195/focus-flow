@@ -1,56 +1,13 @@
 //! Экран «Фокус»: кольцо таймера, пункт, одна главная кнопка по контексту.
 
 use dioxus::prelude::*;
-use focus_api_types::{ActiveSession, DoneNext, StatusDto, TaskDto, TaskId};
+use focus_api_types::{DoneNext, TaskDto, TaskId};
 
 use crate::api::{jira_key, ApiHandle};
 use crate::components::{Dialog, Icon, ItemPicker, NormBar, Ring, RingTone, Segment};
 use crate::fmt;
 use crate::state::{run, use_api, use_app, AppState, Command};
-
-/// Что сейчас показывает экран.
-#[derive(Debug, Clone, PartialEq)]
-enum View {
-    /// Данных ещё нет.
-    Loading,
-    /// Ничего не идёт.
-    Idle,
-    /// Работа (`remaining`, `total`).
-    Work { remaining: i64, total: i64 },
-    /// Отдых.
-    Rest { remaining: i64, total: i64 },
-    /// Планирование (`elapsed`).
-    Planning { elapsed: i64 },
-}
-
-fn view_of(status: Option<&StatusDto>) -> View {
-    let Some(s) = status else {
-        return View::Loading;
-    };
-    let now = s.server_time;
-    match &s.active {
-        None => View::Idle,
-        Some(ActiveSession::Work {
-            started_at,
-            ends_at,
-            ..
-        }) => View::Work {
-            remaining: (*ends_at - now).num_seconds().max(0),
-            total: (*ends_at - *started_at).num_seconds().max(1),
-        },
-        Some(ActiveSession::Rest {
-            started_at,
-            ends_at,
-            ..
-        }) => View::Rest {
-            remaining: (*ends_at - now).num_seconds().max(0),
-            total: (*ends_at - *started_at).num_seconds().max(1),
-        },
-        Some(ActiveSession::Planning { started_at, .. }) => View::Planning {
-            elapsed: (now - *started_at).num_seconds().max(0),
-        },
-    }
-}
+use crate::timer::{use_timer_view, TimerView as View};
 
 /// Найти пункт и его родителя в дереве.
 /// Родитель пункта: название и ключ Jira.
@@ -128,7 +85,7 @@ fn main_action(api: &ApiHandle, mut app: AppState) {
         app.interrupt_dialog.set(false);
         return;
     }
-    let view = view_of(app.status.peek().as_ref());
+    let view = View::of(app.status.peek().as_ref());
     match view {
         View::Idle => {
             if *app.picker_open.peek() {
@@ -176,7 +133,7 @@ pub fn Focus() -> Element {
     use_hotkeys(api.clone(), app);
 
     let status = app.status.read().clone();
-    let view = view_of(status.as_ref());
+    let view = use_timer_view()();
     let busy = (app.busy)();
 
     let (worked, target) = status
@@ -218,7 +175,9 @@ pub fn Focus() -> Element {
             "50:00".to_string(),
             "один пункт",
         ),
-        View::Work { remaining, total } => (
+        View::Work {
+            remaining, total, ..
+        } => (
             "Работа",
             RingTone::Work,
             (*total / 60).max(1) as u32,
@@ -244,10 +203,7 @@ pub fn Focus() -> Element {
         ),
     };
 
-    let work_item = match status.as_ref().and_then(|s| s.active.as_ref()) {
-        Some(ActiveSession::Work { item, .. }) => Some(item.clone()),
-        _ => None,
-    };
+    let work_item = view.item().cloned();
     let work_item_key = work_item.as_ref().and_then(|it| {
         app.tasks
             .read()

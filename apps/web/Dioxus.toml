@@ -6,3 +6,7 @@ public_dir = "public"
 title = "Focus Flow — таймер фокуса 50/10"
 base_path = "focus-flow"
 
+# В release dx прогоняет wasm-opt сам. DWARF вырезается, только если собирать
+# с `--debug-symbols=false`: у dx 0.7 он по умолчанию включён и в release.
+[web.wasm_opt]
+level = "z"

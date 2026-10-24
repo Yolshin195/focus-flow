@@ -550,6 +550,8 @@ pub enum Command {
     CreateItems(TaskId, Vec<String>),
     /// Отметить готовым / вернуть в план.
     SetDone(TaskId, bool),
+    /// Правка пункта из карточки: текст, заметка, оценка, день, статус.
+    Update(TaskId, TaskPatch),
     /// Импорт по ссылке.
     Import(String),
 }
@@ -580,6 +582,7 @@ pub fn run(api: ApiHandle, mut state: AppState, cmd: Command, on_ok: impl FnOnce
                 | Command::CreateWithItems(..)
                 | Command::CreateItems(..)
                 | Command::SetDone(..)
+                | Command::Update(..)
                 | Command::Import(_)
                 | Command::Done(_)
                 | Command::StartWork(_)
@@ -609,6 +612,7 @@ pub fn run(api: ApiHandle, mut state: AppState, cmd: Command, on_ok: impl FnOnce
                 };
                 api.0.update_task(id, patch).await.map(drop)
             }
+            Command::Update(id, patch) => api.0.update_task(id, patch).await.map(drop),
             Command::Import(url) => api.0.import(url).await.map(drop),
         };
         match result {

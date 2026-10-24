@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use focus_api_types::chrono::Utc;
 use focus_api_types::{ActiveSession, ApiError, NewTask, TaskDto, TaskId, TaskStatus};
 
+use super::item_card::ItemCard;
 use crate::api::jira_key;
 use crate::components::{Icon, TextArea};
 use crate::fmt;
@@ -70,6 +71,23 @@ fn add_items(parent: TaskId, text: &str) -> Option<Command> {
     }
 }
 
+/// Какой пункт открыт в карточке — контекст экрана для строк пунктов.
+#[derive(Clone, Copy)]
+struct OpenCard(Signal<Option<TaskId>>);
+
+/// Пункт и его задача (`None` — пункт без задачи). Узел с пунктами — не пункт.
+fn find_card(tree: &[TaskDto], id: TaskId) -> Option<(TaskDto, Option<TaskDto>)> {
+    tree.iter().find_map(|t| {
+        if t.id == id {
+            return t.is_item().then(|| (t.clone(), None));
+        }
+        t.children
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| (c.clone(), Some(t.clone())))
+    })
+}
+
 fn shift(e: &KeyboardEvent) -> bool {
     e.modifiers().contains(Modifiers::SHIFT)
 }
@@ -83,8 +101,11 @@ pub fn Tasks() -> Element {
     // Пересоздать поле (очистить) после «Создать» / «Импорт».
     let mut text_reset = use_signal(|| 0u32);
     let collapsed = use_signal(HashSet::<TaskId>::new);
+    let mut open_card = use_signal(|| None::<TaskId>);
+    use_context_provider(|| OpenCard(open_card));
 
     let tree = app.tasks.read().clone();
+    let card = open_card().and_then(|id| find_card(&tree, id));
     // Пункты без родителя — одной группой в конце.
     let loose: Vec<TaskDto> = tree.iter().filter(|t| t.is_item()).cloned().collect();
     let open_items: usize = tree
@@ -174,98 +195,124 @@ pub fn Tasks() -> Element {
                 }
             }
 
-            div { class: "composer",
-                label { class: "field field-new",
-                    {Icon::Plus.render(18)}
-                    TextArea {
-                        reset: text_reset(),
-                        refocus: true,
-                        placeholder: "Задача, пункт или ссылка Jira",
-                        label: "Новая задача, пункт или ссылка на задачу Jira",
-                        spellcheck: !matches!(draft, Draft::Jira(..)),
-                        on_input: move |v| text.set(v),
-                        on_keydown: move |e: KeyboardEvent| {
-                            // Enter — создать, Shift+Enter — новая строка (будущий пункт).
-                            if e.key() == Key::Enter && !shift(&e) {
-                                e.prevent_default();
-                                submit_enter();
+            div { class: "tasks-body",
+                div { class: "tasks-main",
+                    div { class: "composer",
+                        label { class: "field field-new",
+                            {Icon::Plus.render(18)}
+                            TextArea {
+                                reset: text_reset(),
+                                refocus: true,
+                                placeholder: "Задача, пункт или ссылка Jira",
+                                label: "Новая задача, пункт или ссылка на задачу Jira",
+                                spellcheck: !matches!(draft, Draft::Jira(..)),
+                                on_input: move |v| text.set(v),
+                                on_keydown: move |e: KeyboardEvent| {
+                                    // Enter — создать, Shift+Enter — новая строка (будущий пункт).
+                                    if e.key() == Key::Enter && !shift(&e) {
+                                        e.prevent_default();
+                                        submit_enter();
+                                    }
+                                },
                             }
-                        },
+                            match &draft {
+                                Draft::Empty => rsx! {},
+                                Draft::Jira(_, key) => rsx! {
+                                    button {
+                                        class: "btn btn-small btn-accent",
+                                        disabled: !can_submit,
+                                        onclick: move |_| submit_click(),
+                                        "Импорт {key}"
+                                    }
+                                },
+                                Draft::List(_, items) => rsx! {
+                                    button {
+                                        class: "btn btn-small",
+                                        disabled: !can_submit,
+                                        onclick: move |_| submit_click(),
+                                        "Создать + {items.len()}"
+                                    }
+                                },
+                                Draft::Text(_) => rsx! {
+                                    button {
+                                        class: "btn btn-small",
+                                        disabled: !can_submit,
+                                        onclick: move |_| submit_click(),
+                                        "Создать"
+                                    }
+                                },
+                            }
+                        }
+                        match &draft {
+                            Draft::Jira(_, key) => rsx! {
+                                p { class: "composer-hint", role: "note",
+                                    if let Some(note) = jira_note {
+                                        "{note} "
+                                        Link { to: Route::Settings {}, "Подключить в настройках" }
+                                    } else {
+                                        "Задача Jira "
+                                        b { "{key}" }
+                                        ": подтянем название и чек-лист, строки станут пунктами."
+                                    }
+                                }
+                            },
+                            Draft::List(title, items) => rsx! {
+                                p { class: "composer-hint",
+                                    "Задача «"
+                                    b { "{title}" }
+                                    "» и {items.len()} {fmt::plural(items.len(), \"пункт\", \"пункта\", \"пунктов\")}. Первая строка — задача, остальные — пункты."
+                                }
+                            },
+                            _ => rsx! {},
+                        }
                     }
-                    match &draft {
-                        Draft::Empty => rsx! {},
-                        Draft::Jira(_, key) => rsx! {
-                            button {
-                                class: "btn btn-small btn-accent",
-                                disabled: !can_submit,
-                                onclick: move |_| submit_click(),
-                                "Импорт {key}"
+
+                    if tree.is_empty() {
+                        div { class: "empty",
+                            h2 { class: "empty-title", "Задач пока нет" }
+                            p { class: "empty-text",
+                                "Напиши задачу и нажми Enter или вставь ссылку на задачу Jira — пункты чек-листа станут шагами. Несколько строк (Shift+Enter) — задача и её пункты."
                             }
-                        },
-                        Draft::List(_, items) => rsx! {
-                            button {
-                                class: "btn btn-small",
-                                disabled: !can_submit,
-                                onclick: move |_| submit_click(),
-                                "Создать + {items.len()}"
+                        }
+                    }
+
+                    div { class: "tree",
+                        for task in tree.iter().filter(|t| !t.is_item()).cloned() {
+                            TaskNode { key: "{task.id}", task, collapsed }
+                        }
+                        if !loose.is_empty() {
+                            div { class: "task task-loose",
+                                div { class: "task-loose-title", "Без задачи" }
+                                div { class: "items",
+                                    for item in loose.iter().filter(|t| !is_done(t)).cloned() {
+                                        ItemRow { key: "{item.id}", item, loose: true }
+                                    }
+                                    DoneFold { items: loose.iter().filter(|t| is_done(t)).cloned().collect::<Vec<_>>(), loose: true }
+                                }
                             }
-                        },
-                        Draft::Text(_) => rsx! {
-                            button {
-                                class: "btn btn-small",
-                                disabled: !can_submit,
-                                onclick: move |_| submit_click(),
-                                "Создать"
-                            }
-                        },
+                        }
                     }
                 }
-                match &draft {
-                    Draft::Jira(_, key) => rsx! {
-                        p { class: "composer-hint", role: "note",
-                            if let Some(note) = jira_note {
-                                "{note} "
-                                Link { to: Route::Settings {}, "Подключить в настройках" }
-                            } else {
-                                "Задача Jira "
-                                b { "{key}" }
-                                ": подтянем название и чек-лист, строки станут пунктами."
-                            }
+                if card.is_some() {
+                    button {
+                        class: "item-card-scrim",
+                        tabindex: "-1",
+                        "aria-hidden": "true",
+                        onclick: move |_| open_card.set(None),
+                    }
+                }
+                aside {
+                    class: if card.is_some() { "item-card open" } else { "item-card" },
+                    "aria-label": "Карточка пункта",
+                    onkeydown: move |e: KeyboardEvent| {
+                        if e.key() == Key::Escape {
+                            open_card.set(None);
                         }
                     },
-                    Draft::List(title, items) => rsx! {
-                        p { class: "composer-hint",
-                            "Задача «"
-                            b { "{title}" }
-                            "» и {items.len()} {fmt::plural(items.len(), \"пункт\", \"пункта\", \"пунктов\")}. Первая строка — задача, остальные — пункты."
-                        }
-                    },
-                    _ => rsx! {},
-                }
-            }
-
-            if tree.is_empty() {
-                div { class: "empty",
-                    h2 { class: "empty-title", "Задач пока нет" }
-                    p { class: "empty-text",
-                        "Напиши задачу и нажми Enter или вставь ссылку на задачу Jira — пункты чек-листа станут шагами. Несколько строк (Shift+Enter) — задача и её пункты."
-                    }
-                }
-            }
-
-            div { class: "tree",
-                for task in tree.iter().filter(|t| !t.is_item()).cloned() {
-                    TaskNode { key: "{task.id}", task, collapsed }
-                }
-                if !loose.is_empty() {
-                    div { class: "task task-loose",
-                        div { class: "task-loose-title", "Без задачи" }
-                        div { class: "items",
-                            for item in loose.iter().filter(|t| !is_done(t)).cloned() {
-                                ItemRow { key: "{item.id}", item, loose: true }
-                            }
-                            DoneFold { items: loose.iter().filter(|t| is_done(t)).cloned().collect::<Vec<_>>(), loose: true }
-                        }
+                    if let Some((item, parent)) = card.clone() {
+                        ItemCard { key: "{item.id}", item, parent, on_close: move |_| open_card.set(None) }
+                    } else {
+                        p { class: "item-card-empty", "Выбери пункт — здесь он откроется целиком: текст, заметка, оценка." }
                     }
                 }
             }
@@ -543,6 +590,7 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
     let api = use_api();
     let mut app = use_app();
     let nav = use_navigator();
+    let OpenCard(mut open_card) = use_context::<OpenCard>();
     let id = item.id;
     let done = is_done(&item);
     let active = app.status.read().as_ref().and_then(|s| s.active.clone());
@@ -550,33 +598,22 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
     let can_start = matches!(active, None | Some(ActiveSession::Planning { .. }));
     let api_done = api.clone();
     let api_start = api.clone();
-    let mut expanded = use_signal(|| false);
     let estimate = item.estimate_intervals.filter(|n| *n > 0);
     let today = item.planned_for == Some(fmt::local_date(Utc::now()));
     let has_note = item.notes.as_deref().is_some_and(|n| !n.trim().is_empty());
     let has_meta = in_work || estimate.is_some() || today || has_note;
-    // Пункт без родителя можно разбить на пункты — тогда он станет задачей.
-    let mut adding = use_signal(|| false);
-    let mut draft = use_signal(String::new);
-    let mut draft_reset = use_signal(|| 0u32);
-    let api_add = api.clone();
-    let mut add = move || {
-        let Some(cmd) = add_items(id, &draft.peek()) else {
-            adding.set(false);
-            return;
-        };
-        run(api_add.clone(), app, cmd, move || {
-            draft.set(String::new());
-            draft_reset += 1;
-        });
-    };
-    let row = if in_work {
-        "item-row in-work"
+    let mut row = String::from("item-row");
+    if in_work {
+        row.push_str(" in-work");
     } else if done {
-        "item-row done"
-    } else {
-        "item-row"
-    };
+        row.push_str(" done");
+    }
+    if open_card() == Some(id) {
+        row.push_str(" selected");
+    }
+    if loose {
+        row.push_str(" loose");
+    }
 
     rsx! {
         div { class: row,
@@ -587,9 +624,10 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
             }
             div { class: "item-body",
                 button {
-                    class: if expanded() { "item-text expanded" } else { "item-text" },
-                    "aria-expanded": "{expanded()}",
-                    onclick: move |_| expanded.toggle(),
+                    class: "item-text",
+                    title: "Открыть карточку пункта",
+                    "aria-haspopup": "dialog",
+                    onclick: move |_| open_card.set(Some(id)),
                     "{item.title}"
                 }
                 if has_meta {
@@ -618,22 +656,9 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
                         }
                     }
                 }
-                if expanded() && loose && !done && !in_work && !adding() {
-                    div { class: "item-actions",
-                        button {
-                            class: "btn btn-ghost btn-small",
-                            title: "Пункт станет задачей",
-                            onclick: move |_| adding.set(true),
-                            {Icon::Plus.render(14)}
-                            "Разбить на пункты"
-                        }
-                    }
-                }
             }
-            if in_work {
+            if in_work || done {
                 span { class: "play-slot", "aria-hidden": "true" }
-            } else if done {
-                span { class: "play-slot" }
             } else {
                 button {
                     class: "play",
@@ -649,35 +674,6 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
                         });
                     },
                     span { class: "play-dot", {Icon::Play.render(14)} }
-                }
-            }
-        }
-        if adding() {
-            div { class: "item-add",
-                TextArea {
-                    reset: draft_reset(),
-                    refocus: true,
-                    class: "inline-input",
-                    placeholder: "Пункт для «{item.title}» — Enter, чтобы добавить",
-                    label: "Новый пункт",
-                    autofocus: true,
-                    on_input: move |v| draft.set(v),
-                    on_keydown: move |e: KeyboardEvent| match e.key() {
-                        Key::Enter if !shift(&e) => {
-                            e.prevent_default();
-                            add();
-                        }
-                        Key::Escape => {
-                            draft.set(String::new());
-                            adding.set(false);
-                        }
-                        _ => {}
-                    },
-                    on_blur: move |_| {
-                        if draft.peek().trim().is_empty() {
-                            adding.set(false);
-                        }
-                    },
                 }
             }
         }

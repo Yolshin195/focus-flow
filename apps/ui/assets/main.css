@@ -1573,6 +1573,309 @@ kbd {
   padding: var(--sp-1) var(--sp-1) var(--sp-1) 44px;
 }
 
+.item-row.selected {
+  background: var(--surface-2);
+}
+
+/* ───────── Карточка пункта ─────────
+   До 1100 px — выезжает справа поверх списка (на телефоне — лист снизу),
+   от 1100 px — постоянная колонка справа от списка. */
+
+.item-card-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  background: var(--scrim);
+  cursor: default;
+  animation: fade-in var(--t-med) var(--ease);
+}
+
+.item-card {
+  display: none;
+}
+
+.item-card.open {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  width: min(400px, 92vw);
+  padding: var(--sp-5);
+  overflow-y: auto;
+  background: var(--surface-2);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-float);
+  animation: drawer-in var(--t-med) var(--ease);
+}
+
+@keyframes drawer-in {
+  from { opacity: 0; transform: translateX(24px); }
+}
+
+@media (min-width: 1100px) {
+  .page.tasks {
+    max-width: 1320px;
+  }
+
+  .tasks-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: var(--sp-6);
+    align-items: start;
+  }
+
+  .item-card-scrim {
+    display: none;
+  }
+
+  .item-card,
+  .item-card.open {
+    position: sticky;
+    top: var(--sp-6);
+    z-index: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    width: auto;
+    max-height: calc(100dvh - 2 * var(--sp-6));
+    padding: var(--sp-5);
+    overflow-y: auto;
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    box-shadow: none;
+    animation: none;
+  }
+}
+
+.item-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.item-card-parent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+  padding-top: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.item-card-parent-title {
+  overflow-wrap: anywhere;
+}
+
+.item-card-close {
+  flex: none;
+  margin: -2px -6px 0 0;
+}
+
+.item-card-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+textarea.item-card-title {
+  display: block;
+  width: calc(100% + 2 * var(--sp-2));
+  margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) 0;
+  padding: 6px var(--sp-2);
+  resize: none;
+  field-sizing: content;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+textarea.item-card-title:hover {
+  border-color: var(--line-strong);
+}
+
+textarea.item-card-title:focus {
+  background: var(--bg);
+  border-color: rgba(233, 235, 239, 0.35);
+}
+
+.item-card-note {
+  margin: calc(-1 * var(--sp-2)) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.item-card-note-center {
+  margin-top: var(--sp-1);
+  text-align: center;
+}
+
+.item-card-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--work);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.item-card-rows {
+  border-top: 1px solid var(--line);
+}
+
+.item-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+}
+
+.item-card-row-label {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-2);
+}
+
+.item-card-row-label small {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.stepper .icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.stepper .icon-btn:disabled {
+  opacity: 0.4;
+}
+
+.stepper-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-width: 112px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  transition: background var(--t-fast) var(--ease);
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.switch.on {
+  background: var(--planning);
+}
+
+.switch.on::after {
+  transform: translateX(18px);
+  background: var(--text-on-accent);
+}
+
+.item-card-label {
+  margin-bottom: calc(-1 * var(--sp-2));
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.item-card-notes {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  max-height: 280px;
+  padding: 10px var(--sp-3);
+  resize: vertical;
+  field-sizing: content;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  outline: none;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.item-card-notes:focus {
+  border-color: rgba(233, 235, 239, 0.35);
+}
+
+.item-card-notes::placeholder,
+.inline-input::placeholder {
+  color: var(--text-3);
+}
+
+.item-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.item-card-actions .btn-primary {
+  width: 100%;
+  min-width: 0;
+}
+
+.item-card-actions .btn-primary .icon path {
+  fill: currentColor;
+}
+
+.item-card-split {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.item-card-empty {
+  margin: 0;
+  padding: var(--sp-8) var(--sp-2);
+  color: var(--text-3);
+  text-align: center;
+}
+
 .inline-input {
   display: block;
   width: 100%;
@@ -2663,13 +2966,49 @@ kbd {
     padding-bottom: 0;
   }
 
-  .page.tasks > .tree,
-  .page.tasks > .empty {
+  .tasks-body,
+  .tasks-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .tasks-main > .tree,
+  .tasks-main > .empty {
     order: 1;
   }
 
-  .page.tasks > .tree {
+  .tasks-main > .tree {
     padding-bottom: var(--sp-4);
+  }
+
+  /* Карточка пункта — лист снизу поверх вкладок */
+  .item-card.open {
+    top: auto;
+    left: 0;
+    width: auto;
+    max-height: 88dvh;
+    padding: var(--sp-2) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+    border-left: 0;
+    border-top: 1px solid var(--line-strong);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    animation: sheet-up var(--t-med) var(--ease);
+  }
+
+  .item-card.open::before {
+    content: "";
+    flex: none;
+    align-self: center;
+    width: 36px;
+    height: 4px;
+    margin-bottom: calc(-1 * var(--sp-1));
+    border-radius: var(--r-pill);
+    background: var(--line-strong);
+  }
+
+  .item-card-notes,
+  textarea.item-card-title {
+    font-size: var(--fs-lg);
   }
 
   .composer {

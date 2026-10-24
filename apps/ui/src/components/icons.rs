@@ -15,6 +15,8 @@ pub enum Icon {
     Chevron,
     /// Плюс.
     Plus,
+    /// Минус.
+    Minus,
     /// Поиск.
     Search,
     /// Галочка.
@@ -84,6 +86,9 @@ impl Icon {
             },
             Icon::Plus => rsx! {
                 Svg { size, path { d: "M10 4.5v11M4.5 10h11" } }
+            },
+            Icon::Minus => rsx! {
+                Svg { size, path { d: "M4.5 10h11" } }
             },
             Icon::Search => rsx! {
                 Svg { size,

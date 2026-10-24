@@ -6,17 +6,23 @@
 
 use dioxus::prelude::*;
 
-/// Подогнать высоту поля в фокусе под текст (для движков без `field-sizing`).
-const AUTOSIZE_JS: &str = r#"const el = document.activeElement;
-if (el && el.tagName === "TEXTAREA" && !CSS.supports("field-sizing", "content")) {
-  el.style.height = "auto";
-  el.style.height = el.scrollHeight + "px";
+/// Подогнать высоту полей под текст (для движков без `field-sizing`):
+/// после ввода — поле в фокусе, после создания — все (в них `initial`).
+const FIT_FOCUSED_JS: &str = r#"if (!CSS.supports("field-sizing", "content")) {
+  const el = document.activeElement;
+  if (el && el.tagName === "TEXTAREA") { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
+}"#;
+const FIT_ALL_JS: &str = r#"if (!CSS.supports("field-sizing", "content")) {
+  for (const el of document.querySelectorAll("textarea")) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
 }"#;
 
-/// Многострочное поле ввода.
+/// Многострочное поле ввода; `initial` — значение при (пере)создании.
 #[component]
 pub fn TextArea(
-    /// Смена значения пересоздаёт поле пустым.
+    /// Начальное значение.
+    #[props(default)]
+    initial: String,
+    /// Смена значения пересоздаёт поле с `initial`.
     #[props(default)]
     reset: u32,
     /// Вернуть фокус после пересоздания (когда `reset > 0`).
@@ -39,16 +45,18 @@ pub fn TextArea(
                 rows: "1",
                 placeholder: "{placeholder}",
                 "aria-label": "{label}",
+                initial_value: "{initial}",
                 autofocus,
                 autocomplete: "off",
                 spellcheck: if spellcheck { "true" } else { "false" },
                 oninput: move |e| {
                     on_input.call(e.value());
-                    document::eval(AUTOSIZE_JS);
+                    document::eval(FIT_FOCUSED_JS);
                 },
                 onkeydown: move |e| on_keydown.call(e),
                 onblur: move |_| on_blur.call(()),
                 onmounted: move |e| async move {
+                    document::eval(FIT_ALL_JS);
                     if refocus && n > 0 {
                         let _ = e.set_focus(true).await;
                     }

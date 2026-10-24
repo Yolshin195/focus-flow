@@ -13,6 +13,7 @@ pub mod domain;
 pub mod error;
 pub mod events;
 pub mod memory;
+pub mod outbox;
 pub mod ports;
 pub mod rules;
 mod service;
@@ -21,7 +22,9 @@ pub use clock::{Clock, ManualClock, SystemClock};
 pub use domain::{ImportedItem, ImportedTask, Session, Settings, Task, WorkDay};
 pub use error::{CoreError, CoreResult};
 pub use events::DomainEvent;
+pub use outbox::{OutboxEntry, OutboxId, OutboxStats};
 pub use ports::{
-    DayRepo, EventSink, NoTaskSources, Ports, SessionRepo, SettingsRepo, TaskRepo, TaskSources,
+    DayRepo, EventSink, NoTaskSources, Outbox, Ports, SessionRepo, SettingsRepo, TaskRepo,
+    TaskSources,
 };
 pub use service::{FocusService, session_dto};

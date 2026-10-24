@@ -51,3 +51,5 @@ uuid = { version = "1.29.0", features = ["v7", "serde"] }
 # ядро: асинхронный мьютекс без привязки к runtime; исполнитель — только в тестах
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 futures-executor = "0.3.34"
+# тесты хранилища: временные файлы БД
+tempfile = "3.27.0"

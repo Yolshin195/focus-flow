@@ -8,13 +8,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use focus_api_types::{DayId, SessionId, TaskId};
 
 use crate::clock::Clock;
 use crate::domain::{ImportedTask, Session, Settings, Task, WorkDay};
 use crate::error::CoreResult;
 use crate::events::DomainEvent;
+use crate::outbox::{OutboxEntry, OutboxId, OutboxStats};
 
 /// Рабочие дни.
 #[async_trait]
@@ -70,6 +71,30 @@ pub trait SettingsRepo: Send + Sync {
 pub trait EventSink: Send + Sync {
     /// Поставить события в очередь (порядок сохраняется).
     async fn publish(&self, events: &[DomainEvent]) -> CoreResult<()>;
+}
+
+/// Очередь outbox для воркера доставки (шаг 5). Публикация
+/// ([`EventSink::publish`]) раскладывает событие на записи — по одной на
+/// каждого подписчика (`plugin_id`); без подписчиков событие никуда не пишется.
+#[async_trait]
+pub trait Outbox: EventSink {
+    /// Задать подписчиков (id включённых плагинов) для новых публикаций.
+    async fn set_subscribers(&self, plugin_ids: &[String]) -> CoreResult<()>;
+    /// Записи, готовые к доставке в момент `now`, в порядке публикации; по
+    /// каждому плагину порядок сохраняется (см. [`crate::outbox::select_due`]).
+    async fn fetch_due(&self, now: DateTime<Utc>, limit: usize) -> CoreResult<Vec<OutboxEntry>>;
+    /// Запись доставлена.
+    async fn mark_done(&self, id: OutboxId, now: DateTime<Utc>) -> CoreResult<()>;
+    /// Доставка не удалась: `attempts + 1`, ошибка и следующая попытка через
+    /// [`crate::outbox::backoff`]. Возвращает момент следующей попытки.
+    async fn mark_failed(
+        &self,
+        id: OutboxId,
+        error: &str,
+        now: DateTime<Utc>,
+    ) -> CoreResult<DateTime<Utc>>;
+    /// Сводка очереди по плагинам (только плагины, у которых есть записи).
+    async fn stats(&self) -> CoreResult<Vec<OutboxStats>>;
 }
 
 /// Реестр источников задач (плагины `TaskSource`).

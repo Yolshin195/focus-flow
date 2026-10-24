@@ -35,6 +35,7 @@ fn status() -> StatusDto {
         worked_today_sec: 300,
         target_sec: 8 * 3600,
         idle_since: None,
+        rest_due: false,
     }
 }
 
@@ -250,4 +251,13 @@ fn ids_are_plain_uuid_strings() {
     let json = serde_json::to_value(task).unwrap();
     assert_eq!(json, json!(Uuid::from_u128(42).to_string()));
     assert_eq!(task.to_string().parse::<TaskId>().unwrap(), task);
+}
+
+#[test]
+fn status_without_rest_due_parses() {
+    // Сервис до `rest_due`: поля нет — значит, отдых не ждёт.
+    let mut json = serde_json::to_value(status()).unwrap();
+    json.as_object_mut().unwrap().remove("rest_due");
+    let back: StatusDto = serde_json::from_value(json).unwrap();
+    assert!(!back.rest_due);
 }

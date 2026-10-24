@@ -5,6 +5,10 @@
 //! с моком — опрос раз в секунду. Между событиями клиент сам досчитывает
 //! время: таймер — от `ends_at` и `server_time` последнего снимка плюс
 //! прошедшее по местным часам (смещение часов клиента не важно).
+//!
+//! Звать человека — дело клиента, не сервиса: работа кончилась по лимиту
+//! (`rest_due`) или кончился отдых → уведомление и сигнал ([`Alarm`]) до
+//! реакции.
 
 use std::time::Duration as StdDuration;
 
@@ -82,6 +86,8 @@ pub struct AppState {
     pub busy: Signal<bool>,
     /// Связь с сервисом.
     pub conn: Signal<Conn>,
+    /// Звучит сигнал «время вышло».
+    pub alarm: Signal<Option<Alarm>>,
     /// Сколько раз извне окна (трей) попросили открыть «Фокус» — см. [`AppState::reveal`].
     pub(crate) focus_requests: Signal<u64>,
     /// Последний статус от сервиса как есть (`status` — он же, досчитанный).
@@ -91,6 +97,15 @@ pub struct AppState {
     /// Досчитывать время между снимками (у сервиса); мок опрашивается
     /// каждую секунду и может стоять на месте (`FOCUS_MOCK_SPEED=0`).
     local_clock: bool,
+}
+
+/// Сигнал «время вышло»: звучит, пока человек не отреагирует.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Alarm {
+    /// Работа закрыта по лимиту — до «Начать отдых».
+    WorkOver,
+    /// Отдых кончился — до «Понятно» или старта новой сессии.
+    RestOver,
 }
 
 /// Что открыть на экране «Фокус» по запросу извне окна (трей, строка меню).
@@ -106,6 +121,14 @@ pub enum Reveal {
 }
 
 impl AppState {
+    /// «Понятно»: выключить сигнал о конце отдыха. Сигнал о конце работы
+    /// выключает только «Начать отдых».
+    pub fn dismiss_alarm(self) {
+        if *self.alarm.peek() == Some(Alarm::RestOver) {
+            set_alarm(&consume_context::<PlatformHandle>(), self, None);
+        }
+    }
+
     /// Открыть «Фокус» и, если фаза подходит, диалог. Окно показывает сама
     /// платформа; переход на экран делает layout.
     pub fn reveal(mut self, what: Reveal) {
@@ -193,6 +216,7 @@ pub fn use_app_provider(preset: UiPreset) -> AppState {
         preset: root_signal(preset),
         busy: root_signal(false),
         conn: root_signal(Conn::Unknown),
+        alarm: root_signal(None),
         focus_requests: root_signal(0),
         base_status: root_signal(None),
         base_day: root_signal(None),
@@ -337,8 +361,8 @@ async fn on_event(api: &ApiHandle, platform: &PlatformHandle, state: AppState, e
     match ev {
         ServerEvent::StatusChanged(status) => apply_status(api, platform, state, status).await,
         ServerEvent::TaskChanged { .. } => refresh_tasks(api, state).await,
-        // За `session_ended` сервис сразу шлёт `status_changed`; уведомление
-        // о лимите показывает сам сервис.
+        // За `session_ended` сервис сразу шлёт `status_changed` — сигнал
+        // включается по нему.
         ServerEvent::SessionEnded { .. }
         | ServerEvent::PluginError { .. }
         | ServerEvent::Unknown => {}
@@ -360,10 +384,7 @@ async fn apply_status(
     {
         return;
     }
-    // Уведомления о лимите показывает сервис — клиент сервиса их не дублирует.
-    if !api.is_remote() {
-        notify_transition(platform, prev.as_ref(), &status);
-    }
+    update_alarm(platform, state, prev.as_ref(), &status);
     let kind = status.active.as_ref().map(|a| a.kind());
     if prev
         .as_ref()
@@ -469,26 +490,51 @@ pub(crate) fn advance_day(d: &DayDto, dt: Duration) -> DayDto {
     d
 }
 
-/// Уведомления о сменах, которые случились без участия пользователя
-/// (только для мока: сервис уведомляет сам).
-fn notify_transition(platform: &PlatformHandle, prev: Option<&StatusDto>, now: &StatusDto) {
-    let prev_kind = prev.and_then(|p| p.active.as_ref()).map(|a| a.kind());
-    let prev_id = prev.and_then(|p| p.active.as_ref()).map(|a| a.session_id());
-    let kind = now.active.as_ref().map(|a| a.kind());
-    let id = now.active.as_ref().map(|a| a.session_id());
-    if prev.is_none() || prev_id == id {
+/// Сигнал по статусу: работа кончилась по лимиту → [`Alarm::WorkOver`],
+/// пока не начат отдых; отдых кончился → [`Alarm::RestOver`], пока не
+/// началась новая сессия или не нажато «Понятно». Работает одинаково с
+/// моком и с сервисом (тот может быть и на другой машине).
+fn update_alarm(
+    platform: &PlatformHandle,
+    state: AppState,
+    prev: Option<&StatusDto>,
+    now: &StatusDto,
+) {
+    let cur = *state.alarm.peek();
+    let rest_ended = prev
+        .and_then(|p| p.active.as_ref())
+        .is_some_and(|a| a.kind() == SessionKind::Rest)
+        && now.active.is_none();
+    let next = if now.rest_due {
+        Some(Alarm::WorkOver)
+    } else if now.active.is_some() {
+        None
+    } else if rest_ended {
+        Some(Alarm::RestOver)
+    } else if cur == Some(Alarm::WorkOver) {
+        None // отдых больше не ждёт (например, день закрыт)
+    } else {
+        cur
+    };
+    set_alarm(platform, state, next);
+}
+
+fn set_alarm(platform: &PlatformHandle, mut state: AppState, next: Option<Alarm>) {
+    if *state.alarm.peek() == next {
         return;
     }
-    match (prev_kind, kind) {
-        (Some(SessionKind::Work), Some(SessionKind::Rest)) => platform.0.notify(
-            "50 минут прошли",
-            "Сессия закрыта по лимиту. Начался отдых — встань, пройдись.",
+    match next {
+        Some(Alarm::WorkOver) => platform.0.notify(
+            "Время работы вышло",
+            "Сессия закрыта по лимиту. Открой Focus Flow и начни отдых.",
         ),
-        (Some(SessionKind::Rest), None) => platform
+        Some(Alarm::RestOver) => platform
             .0
             .notify("Отдых окончен", "Выбери пункт и начни работу."),
-        _ => {}
+        None => {}
     }
+    platform.0.alarm(next.is_some());
+    state.alarm.set(next);
 }
 
 /// Перечитать дерево задач.

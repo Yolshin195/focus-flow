@@ -58,7 +58,7 @@ impl TestClock for Clock<'_> {
 fn contract_scenarios_pass() {
     let env = Env::new();
     let results = block_on(run_all_with_clock(&env.svc, &Clock(&env.clock)));
-    assert_eq!(results.len(), 10);
+    assert_eq!(results.len(), 11);
     assert_all_passed(&results).unwrap_or_else(|e| panic!("{e}"));
 }
 
@@ -73,7 +73,7 @@ fn inherent_futures_are_send() {
 }
 
 #[test]
-fn work_limit_closes_with_limit_and_starts_rest() {
+fn work_limit_closes_with_limit_and_waits_for_rest() {
     let env = Env::new();
     let item = env.item("пункт");
     block_on(env.svc.start_work(item.id)).unwrap();
@@ -92,22 +92,32 @@ fn work_limit_closes_with_limit_and_starts_rest() {
     assert_eq!(session.duration_sec, 50 * 60);
     assert!(matches!(events.last(), Some(ServerEvent::StatusChanged(_))));
 
+    // Отдых сам не стартует: ждём «Начать отдых», время теряется.
     let status = block_on(env.svc.status()).unwrap();
+    assert_eq!(status.active, None);
+    assert!(status.rest_due);
+    assert_eq!(status.idle_since, Some(t0() + Duration::minutes(50)));
+    // Пункт остаётся открытым (в работе), не done.
+    let tree = block_on(env.svc.list_tasks()).unwrap();
+    assert_eq!(tree[0].status, TaskStatus::InProgress);
+    assert_eq!(status.worked_today_sec, 50 * 60);
+
+    env.adv(2); // 9:53 — пользователь нажал «Начать отдых»
+    let status = block_on(env.svc.start_rest()).unwrap();
+    assert!(!status.rest_due);
     match status.active {
         Some(ActiveSession::Rest {
             started_at,
             ends_at,
             ..
         }) => {
-            assert_eq!(started_at, t0() + Duration::minutes(50));
-            assert_eq!(ends_at, t0() + Duration::minutes(60));
+            assert_eq!(started_at, t0() + Duration::minutes(53));
+            assert_eq!(ends_at, t0() + Duration::minutes(63));
         }
         other => panic!("ожидался отдых: {other:?}"),
     }
-    // Пункт остаётся открытым (в работе), не done.
-    let tree = block_on(env.svc.list_tasks()).unwrap();
-    assert_eq!(tree[0].status, TaskStatus::InProgress);
-    assert_eq!(status.worked_today_sec, 50 * 60);
+    let day = block_on(env.svc.day(status.day.unwrap().date)).unwrap();
+    assert_eq!(day.totals.lost_sec, 3 * 60);
 }
 
 #[test]
@@ -115,7 +125,7 @@ fn rest_ends_by_itself_then_time_is_lost() {
     let env = Env::new();
     let item = env.item("пункт");
     block_on(env.svc.start_work(item.id)).unwrap();
-    // Таймер не вызывался 75 минут: вся цепочка закрывается при «догоне».
+    // Таймер не вызывался 75 минут: работа закрыта ровно на 50-й минуте.
     env.adv(75);
     let events = block_on(env.svc.tick(env.clock.now())).unwrap();
     let ended: Vec<_> = events
@@ -125,23 +135,28 @@ fn rest_ends_by_itself_then_time_is_lost() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        ended,
-        [
-            (SessionKind::Work, Some(EndReason::Limit)),
-            (SessionKind::Rest, Some(EndReason::Limit)),
-        ]
-    );
+    assert_eq!(ended, [(SessionKind::Work, Some(EndReason::Limit))]);
+    block_on(env.svc.start_rest()).unwrap(); // 10:15
+    env.adv(15);
+    let events = block_on(env.svc.tick(env.clock.now())).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        ServerEvent::SessionEnded { session }
+            if session.kind == SessionKind::Rest && session.end_reason == Some(EndReason::Limit)
+    )));
     let status = block_on(env.svc.status()).unwrap();
     assert_eq!(status.active, None);
-    assert_eq!(status.idle_since, Some(t0() + Duration::minutes(60)));
+    assert!(!status.rest_due);
+    assert_eq!(status.idle_since, Some(t0() + Duration::minutes(85)));
 
     let day = block_on(env.svc.day(status.day.unwrap().date)).unwrap();
     assert_eq!(day.totals.work_sec, 50 * 60);
     assert_eq!(day.totals.rest_sec, 10 * 60);
-    assert_eq!(day.totals.lost_sec, 15 * 60);
-    assert_eq!(day.lost.len(), 1);
-    assert_eq!(day.lost[0].start, t0() + Duration::minutes(60));
+    // Ожидание «Начать отдых» (25 мин) и хвост после отдыха (5 мин).
+    assert_eq!(day.totals.lost_sec, 30 * 60);
+    assert_eq!(day.lost.len(), 2);
+    assert_eq!(day.lost[0].start, t0() + Duration::minutes(50));
+    assert_eq!(day.lost[1].start, t0() + Duration::minutes(85));
 }
 
 #[test]
@@ -150,9 +165,10 @@ fn status_catches_up_without_tick_and_tick_reports_later() {
     let item = env.item("пункт");
     block_on(env.svc.start_work(item.id)).unwrap();
     env.adv(55);
-    // Без tick статус уже честный: идёт отдых.
+    // Без tick статус уже честный: работа закрыта, отдых ждёт.
     let status = block_on(env.svc.status()).unwrap();
-    assert!(matches!(status.active, Some(ActiveSession::Rest { .. })));
+    assert_eq!(status.active, None);
+    assert!(status.rest_due);
     // А событие о конце работы отдаёт следующий tick.
     let events = block_on(env.svc.tick(env.clock.now())).unwrap();
     assert!(events.iter().any(|e| matches!(
@@ -292,16 +308,23 @@ fn session_across_midnight_belongs_to_start_day() {
 }
 
 #[test]
-fn work_across_midnight_limit_rest_stays_in_start_day() {
+fn work_across_midnight_limit_keeps_rest_due() {
     let tz = FixedOffset::east_opt(7 * 3600).unwrap();
     let start = Utc.with_ymd_and_hms(2026, 10, 24, 16, 40, 0).unwrap(); // 23:40
     let env = Env::at(ManualClock::with_offset(start, tz));
     let item = env.item("x");
     let day1 = block_on(env.svc.start_work(item.id)).unwrap().day.unwrap();
-    env.adv(55);
+    env.adv(55); // 00:35 — работа кончилась в 00:30, уже в новых сутках
     let st = block_on(env.svc.status()).unwrap();
-    assert!(matches!(st.active, Some(ActiveSession::Rest { .. })));
-    assert_eq!(st.day.unwrap().id, day1.id);
+    assert_eq!(st.active, None);
+    assert!(st.rest_due, "{st:?}");
+    let old = block_on(env.svc.day(day1.date)).unwrap();
+    assert_eq!(old.sessions.len(), 1);
+    assert_eq!(old.totals.work_sec, 50 * 60);
+    // Отдых — уже в сегодняшнем дне, и ожидание снято.
+    let st = block_on(env.svc.start_rest()).unwrap();
+    assert!(!st.rest_due);
+    assert_ne!(st.day.unwrap().id, day1.id);
 }
 
 #[test]

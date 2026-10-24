@@ -48,7 +48,24 @@ impl Mock {
         (x.ended_at.unwrap_or(self.now.get()) - x.started_at).num_seconds()
     }
 
+    /// Закрыть сессию, чей лимит истёк, ровно в её конце (`limit`). Отдых
+    /// после работы сам не стартует.
+    fn expire(&self) {
+        let now = self.now.get();
+        let mut s = self.s.borrow_mut();
+        if let Some(a) = s.sessions.iter_mut().find(|x| x.ended_at.is_none())
+            && let Some(limit) = a.limit_sec
+        {
+            let ends_at = a.started_at + Duration::seconds(limit);
+            if now >= ends_at {
+                a.ended_at = Some(ends_at);
+                a.end_reason = Some(EndReason::Limit);
+            }
+        }
+    }
+
     fn status(&self) -> StatusDto {
+        self.expire();
         let s = self.s.borrow();
         let now = self.now.get();
         let active = s.sessions.iter().find(|x| x.ended_at.is_none()).map(|x| {
@@ -79,6 +96,20 @@ impl Mock {
                 },
             }
         });
+        let idle_since = match (&active, &s.day) {
+            (None, Some(d)) => Some(
+                s.sessions
+                    .iter()
+                    .filter_map(|x| x.ended_at)
+                    .max()
+                    .unwrap_or(d.opened_at),
+            ),
+            _ => None,
+        };
+        let rest_due = active.is_none()
+            && s.sessions.last().is_some_and(|x| {
+                x.kind == SessionKind::Work && x.end_reason == Some(EndReason::Limit)
+            });
         StatusDto {
             server_time: now,
             day: s.day.clone(),
@@ -90,11 +121,13 @@ impl Mock {
                 .map(|x| self.duration(x))
                 .sum(),
             target_sec: i64::from(s.settings.daily_target_min) * 60,
-            idle_since: None,
+            idle_since,
+            rest_due,
         }
     }
 
     fn start(&self, kind: SessionKind, task_id: Option<TaskId>) -> ApiResult<StatusDto> {
+        self.expire();
         {
             let mut s = self.s.borrow_mut();
             if let Some(a) = s.sessions.iter().find(|x| x.ended_at.is_none()) {
@@ -236,6 +269,7 @@ impl FocusApi for Mock {
         Ok(self.status())
     }
     async fn get_day(&self, date: NaiveDate) -> ApiResult<DayDto> {
+        self.expire();
         let s = self.s.borrow();
         let sessions: Vec<SessionDto> = s
             .sessions
@@ -368,7 +402,7 @@ fn block_on<F: Future>(fut: F) -> F::Output {
 fn scenarios_pass_on_reference_mock() {
     let mock = Mock::new();
     let results = block_on(run_all(&mock));
-    assert_eq!(results.len(), 10);
+    assert_eq!(results.len(), 11);
     assert_all_passed(&results).unwrap_or_else(|e| panic!("{e}"));
 }
 

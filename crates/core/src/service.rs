@@ -74,9 +74,10 @@ impl FocusService {
     // ---------------------------------------------------------------- таймер
 
     /// Шаг таймера: закрывает работу по лимиту (`limit`, пункт остаётся
-    /// открытым) и сразу стартует отдых; закрывает отдых, когда он кончился.
-    /// Если `now` ушло далеко вперёд — проходит всю цепочку, каждая сессия
-    /// закрывается ровно в свой `ends_at`.
+    /// открытым) и отдых, когда он кончился. Отдых после работы сам не
+    /// стартует: статус показывает `rest_due`, пока пользователь не нажмёт
+    /// «Начать отдых»; ожидание — потерянное время. Каждая сессия
+    /// закрывается ровно в свой `ends_at`, даже если `now` ушло далеко вперёд.
     ///
     /// Возвращает события для клиентов: `SessionEnded` по каждой закрытой
     /// сессии (включая закрытые «догоном» внутри команд с прошлого вызова) и
@@ -101,21 +102,11 @@ impl FocusService {
 
     /// Закрывает истёкшие сессии до момента `now`.
     async fn catch_up(&self, now: DateTime<Utc>, fx: &mut Effects) -> CoreResult<()> {
-        // Цепочка конечна: работа → отдых → ничего.
-        for _ in 0..4 {
-            let Some(active) = self.p.sessions.active().await? else {
-                return Ok(());
-            };
-            let Some(at) = rules::expired_at(&active, now) else {
-                return Ok(());
-            };
-            let closed = self.close(active, at, EndReason::Limit, fx).await?;
-            if closed.kind == SessionKind::Work {
-                // Продолжение цепочки — в тот же день, без проверки закрытия.
-                let settings = self.p.settings.load().await?;
-                self.open_session(closed.day_id, SessionKind::Rest, None, at, &settings)
-                    .await?;
-            }
+        let Some(active) = self.p.sessions.active().await? else {
+            return Ok(());
+        };
+        if let Some(at) = rules::expired_at(&active, now) {
+            self.close(active, at, EndReason::Limit, fx).await?;
         }
         Ok(())
     }
@@ -220,10 +211,14 @@ impl FocusService {
             Some(d) => d.target_sec,
             None => self.p.settings.load().await?.target_sec(),
         };
-        let idle_since = day
-            .as_ref()
-            .filter(|d| d.is_open())
-            .and_then(|d| rules::idle_since(d, &sessions, now));
+        let open_day = day.as_ref().filter(|d| d.is_open());
+        let idle_since = open_day.and_then(|d| rules::idle_since(d, &sessions, now));
+        let rest_due = match (&active, open_day) {
+            (Some(_), _) => false,
+            (None, Some(_)) if !sessions.is_empty() => rules::rest_due(&sessions),
+            // Работа, начатая до полуночи, кончилась уже сегодня.
+            (None, _) => self.rest_due_yesterday(now).await?,
+        };
         let active = match active {
             Some(a) => Some(self.active_dto(&a).await?),
             None => None,
@@ -235,7 +230,19 @@ impl FocusService {
             worked_today_sec: rules::worked_sec(&sessions, now),
             target_sec,
             idle_since,
+            rest_due,
         })
+    }
+
+    /// `rest_due` вчерашнего открытого дня (сегодня сессий ещё не было).
+    async fn rest_due_yesterday(&self, now: DateTime<Utc>) -> CoreResult<bool> {
+        let Some(date) = self.today(now).pred_opt() else {
+            return Ok(false);
+        };
+        match self.p.days.by_date(date).await? {
+            Some(d) if d.is_open() => Ok(rules::rest_due(&self.p.sessions.by_day(d.id).await?)),
+            _ => Ok(false),
+        }
     }
 
     async fn active_dto(&self, s: &Session) -> CoreResult<ActiveSession> {

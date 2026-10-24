@@ -36,7 +36,7 @@ cargo run -p focus-flow -- token    # показать токен доступа
 cargo install --path bin/focus-flow # поставить `focus-flow` в ~/.cargo/bin
 ```
 
-У `serve`, `ui` и `token` есть флаги `--addr` и `--data-dir` (переменные окружения — `FOCUS_ADDR` и `FOCUS_DATA_DIR`). Сервис без окна и без WebKit (например, для VDS) собирается так: `cargo build -p focus-flow --no-default-features --features notify,mcp,jira`.
+У `serve`, `ui` и `token` есть флаги `--addr` и `--data-dir` (переменные окружения — `FOCUS_ADDR` и `FOCUS_DATA_DIR`). Сервис без окна и без WebKit (например, для VDS) собирается так: `cargo build -p focus-flow --no-default-features --features mcp,jira`.
 
 Бинарник из `cargo build` берёт CSS и шрифты из исходников (`apps/ui/assets`). Переносимый пакет с ассетами внутри собирается командой `cd apps/desktop && dx bundle`.
 

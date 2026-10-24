@@ -6,10 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["notify"]
-# Системные уведомления (`notify-rust`). Без фичи — только запись в лог
-# (headless, CI).
-notify = ["dep:notify-rust"]
+default = []
 # MCP-вход на `/mcp` (`rmcp`).
 mcp = ["dep:focus-api-mcp"]
 # Плагин Jira (включён по умолчанию, пока не выключен в настройках).
@@ -29,7 +26,6 @@ focus-plugin-api = { workspace = true }
 focus-plugin-jira = { workspace = true, optional = true }
 focus-storage = { workspace = true }
 getrandom = { workspace = true }
-notify-rust = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net"] }
 serde_json = { workspace = true }
 tokio-util = { workspace = true }

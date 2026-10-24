@@ -324,33 +324,17 @@ impl MockApi {
         now
     }
 
-    /// Ленивая обработка лимитов: работа по лимиту → отдых, отдых по лимиту → простой.
+    /// Ленивая обработка лимитов: сессия закрывается ровно в `ends_at`.
+    /// Отдых после работы сам не стартует — статус показывает `rest_due`.
     fn tick(&self, now: DateTime<Utc>) {
         let mut s = self.s.borrow_mut();
-        loop {
-            let Some(a) = s.sessions.iter_mut().find(|x| x.ended_at.is_none()) else {
-                return;
-            };
-            let Some(ends_at) = a.ends_at() else { return };
-            if now < ends_at {
-                return;
-            }
+        let Some(a) = s.sessions.iter_mut().find(|x| x.ended_at.is_none()) else {
+            return;
+        };
+        let Some(ends_at) = a.ends_at() else { return };
+        if now >= ends_at {
             a.ended_at = Some(ends_at);
             a.end_reason = Some(EndReason::Limit);
-            let (kind, day_id) = (a.kind, a.day_id);
-            if kind == SessionKind::Work {
-                let rest = i64::from(s.settings.rest_min) * 60;
-                s.sessions.push(Session {
-                    id: SessionId::from(new_id()),
-                    day_id,
-                    kind: SessionKind::Rest,
-                    task_id: None,
-                    started_at: ends_at,
-                    ended_at: None,
-                    limit_sec: Some(rest),
-                    end_reason: None,
-                });
-            }
         }
     }
 
@@ -399,7 +383,7 @@ impl MockApi {
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        let (worked, idle_since) = match &day {
+        let (worked, idle_since, rest_due) = match &day {
             Some(d) => {
                 let list = day_sessions(d);
                 let worked = list
@@ -414,9 +398,13 @@ impl MockApi {
                         .unwrap_or(d.opened_at)
                         .max(d.opened_at)
                 });
-                (worked, idle)
+                let rest_due = idle.is_some()
+                    && list.iter().max_by_key(|x| x.started_at).is_some_and(|x| {
+                        x.kind == SessionKind::Work && x.end_reason == Some(EndReason::Limit)
+                    });
+                (worked, idle, rest_due)
             }
-            None => (0, None),
+            None => (0, None, false),
         };
         StatusDto {
             server_time: now,
@@ -428,6 +416,7 @@ impl MockApi {
             active,
             worked_today_sec: worked,
             idle_since,
+            rest_due,
         }
     }
 
@@ -963,7 +952,7 @@ mod tests {
     fn contract_scenarios_pass_realtime() {
         let api = MockApi::realtime();
         let results = block_on(run_all(&api));
-        assert_eq!(results.len(), 10);
+        assert_eq!(results.len(), 11);
         assert_all_passed(&results).unwrap_or_else(|e| panic!("{e}"));
     }
 
@@ -975,21 +964,27 @@ mod tests {
     }
 
     #[test]
-    fn work_limit_turns_into_rest_then_idle() {
+    fn work_limit_waits_for_rest_then_idle() {
         let api = MockApi::frozen(noon());
         let item = block_on(api.create_task(NewTask::new("пункт"))).unwrap();
         block_on(api.start_work(item.id)).unwrap();
         api.advance(Duration::minutes(55));
         let st = block_on(api.get_status()).unwrap();
-        assert!(matches!(st.active, Some(ActiveSession::Rest { .. })));
+        assert_eq!(st.active, None);
+        assert!(st.rest_due);
         assert_eq!(st.worked_today_sec, 50 * 60);
-        api.advance(Duration::minutes(10));
+        let st = block_on(api.start_rest()).unwrap();
+        assert!(matches!(st.active, Some(ActiveSession::Rest { .. })));
+        assert!(!st.rest_due);
+        api.advance(Duration::minutes(15));
         let st = block_on(api.get_status()).unwrap();
         assert_eq!(st.active, None);
-        assert_eq!(st.idle_since, Some(noon() + Duration::minutes(60)));
+        assert!(!st.rest_due);
+        assert_eq!(st.idle_since, Some(noon() + Duration::minutes(65)));
         let day = block_on(api.get_day(st.day.unwrap().date)).unwrap();
-        assert_eq!(day.lost.len(), 1);
-        assert_eq!(day.totals.lost_sec, 5 * 60);
+        // Ожидание «Начать отдых» (5 мин) и хвост после отдыха (5 мин).
+        assert_eq!(day.lost.len(), 2);
+        assert_eq!(day.totals.lost_sec, 10 * 60);
         assert_eq!(day.sessions[0].end_reason, Some(EndReason::Limit));
     }
 

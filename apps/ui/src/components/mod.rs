@@ -5,6 +5,7 @@ mod icons;
 mod norm_bar;
 mod picker;
 mod ring;
+mod text_area;
 mod text_input;
 
 pub use dialog::Dialog;
@@ -12,6 +13,7 @@ pub use icons::Icon;
 pub use norm_bar::{NormBar, Segment};
 pub use picker::ItemPicker;
 pub use ring::{Ring, RingTone};
+pub use text_area::TextArea;
 pub use text_input::TextInput;
 
 use focus_api_types::SessionKind;

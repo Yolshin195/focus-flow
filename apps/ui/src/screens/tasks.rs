@@ -7,7 +7,7 @@ use focus_api_types::chrono::Utc;
 use focus_api_types::{ActiveSession, ApiError, NewTask, TaskDto, TaskId, TaskStatus};
 
 use crate::api::jira_key;
-use crate::components::{Icon, TextInput};
+use crate::components::{Icon, TextArea};
 use crate::fmt;
 use crate::state::{run, use_api, use_app, Command};
 use crate::Route;
@@ -16,16 +16,72 @@ fn is_done(t: &TaskDto) -> bool {
     matches!(t.status, TaskStatus::Done | TaskStatus::Cancelled)
 }
 
+/// Что получится из текста в поле ввода.
+#[derive(Debug, Clone, PartialEq)]
+enum Draft {
+    Empty,
+    /// Одна строка — пункт без задачи.
+    Text(String),
+    /// Ссылка или ключ Jira: (как ввели, ключ).
+    Jira(String, String),
+    /// Несколько строк: задача и её пункты.
+    List(String, Vec<String>),
+}
+
+/// Строка — ссылка Jira, если это URL с ключом задачи или сам ключ: ключ
+/// внутри обычного названия («Починить PROJ-12») импорт не запускает.
+fn parse_draft(text: &str) -> Draft {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    match lines.as_slice() {
+        [] => Draft::Empty,
+        [one] => match jira_key(one) {
+            Some(key) if one.contains("://") || *one == key => Draft::Jira((*one).to_string(), key),
+            _ => Draft::Text((*one).to_string()),
+        },
+        [first, rest @ ..] => Draft::List(
+            (*first).to_string(),
+            rest.iter().map(|l| (*l).to_string()).collect(),
+        ),
+    }
+}
+
+/// Строки текста — названия пунктов (пустые пропускаются).
+fn item_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Команда «добавить пункты к `parent`» из текста: строка — пункт.
+fn add_items(parent: TaskId, text: &str) -> Option<Command> {
+    let mut lines = item_lines(text);
+    match lines.len() {
+        0 => None,
+        1 => lines
+            .pop()
+            .map(|t| Command::Create(NewTask::child(parent, t))),
+        _ => Some(Command::CreateItems(parent, lines)),
+    }
+}
+
+fn shift(e: &KeyboardEvent) -> bool {
+    e.modifiers().contains(Modifiers::SHIFT)
+}
+
 /// Экран «Задачи».
 #[component]
 pub fn Tasks() -> Element {
     let api = use_api();
     let app = use_app();
-    let mut title = use_signal(String::new);
-    let mut link = use_signal(String::new);
+    let mut text = use_signal(String::new);
     // Пересоздать поле (очистить) после «Создать» / «Импорт».
-    let mut title_reset = use_signal(|| 0u32);
-    let mut link_reset = use_signal(|| 0u32);
+    let mut text_reset = use_signal(|| 0u32);
     let collapsed = use_signal(HashSet::<TaskId>::new);
 
     let tree = app.tasks.read().clone();
@@ -53,41 +109,9 @@ pub fn Tasks() -> Element {
     let busy = (app.busy)();
     let nav = use_navigator();
 
-    let api_create = api.clone();
-    let create = move || {
-        let t = title.peek().trim().to_string();
-        if t.is_empty() {
-            return;
-        }
-        run(
-            api_create.clone(),
-            app,
-            Command::Create(NewTask::new(t)),
-            move || {
-                title.set(String::new());
-                title_reset += 1;
-            },
-        );
-    };
-    let create_enter = create.clone();
-    let create_click = create;
-
-    let api_import = api.clone();
-    let import = move || {
-        let url = link.peek().trim().to_string();
-        if url.is_empty() {
-            return;
-        }
-        run(api_import.clone(), app, Command::Import(url), move || {
-            link.set(String::new());
-            link_reset += 1;
-        });
-    };
-    let import_enter = import.clone();
-    let import_click = import;
-    let link_valid = jira_key(&link.read()).is_some();
-    // Подключена ли Jira: без неё импорт не сработает — сразу скажем об этом
-    // и дадим ссылку на настройки. Ошибка запроса — считаем, что неизвестно.
+    // Подключена ли Jira: без неё импорт не сработает — скажем об этом, когда
+    // вставят ссылку, и дадим ссылку на настройки. Ошибка запроса — считаем,
+    // что неизвестно.
     let api_jira = api.clone();
     let jira = use_resource(move || {
         let api = api_jira.clone();
@@ -102,6 +126,29 @@ pub fn Tasks() -> Element {
         _ => None,
     };
     let jira_ready = jira_note.is_none();
+
+    let draft = parse_draft(&text.read());
+    let can_submit = match &draft {
+        Draft::Empty => false,
+        Draft::Jira(..) => jira_ready && !busy,
+        _ => !busy,
+    };
+    let api_submit = api.clone();
+    let submit = move || {
+        let cmd = match parse_draft(&text.peek()) {
+            Draft::Empty => return,
+            Draft::Jira(url, _) if jira_ready => Command::Import(url),
+            Draft::Jira(..) => return,
+            Draft::Text(t) => Command::Create(NewTask::new(t)),
+            Draft::List(t, items) => Command::CreateWithItems(NewTask::new(t), items),
+        };
+        run(api_submit.clone(), app, cmd, move || {
+            text.set(String::new());
+            text_reset += 1;
+        });
+    };
+    let submit_enter = submit.clone();
+    let submit_click = submit;
     let api_plan = api.clone();
 
     rsx! {
@@ -130,47 +177,70 @@ pub fn Tasks() -> Element {
             div { class: "composer",
                 label { class: "field field-new",
                     {Icon::Plus.render(18)}
-                    TextInput {
-                        reset: title_reset(),
+                    TextArea {
+                        reset: text_reset(),
                         refocus: true,
-                        placeholder: "Новая задача…",
-                        label: "Новая задача",
-                        on_input: move |v| title.set(v),
+                        placeholder: "Задача, пункт или ссылка Jira",
+                        label: "Новая задача, пункт или ссылка на задачу Jira",
+                        spellcheck: !matches!(draft, Draft::Jira(..)),
+                        on_input: move |v| text.set(v),
                         on_keydown: move |e: KeyboardEvent| {
-                            if e.key() == Key::Enter {
-                                create_enter();
+                            // Enter — создать, Shift+Enter — новая строка (будущий пункт).
+                            if e.key() == Key::Enter && !shift(&e) {
+                                e.prevent_default();
+                                submit_enter();
                             }
                         },
                     }
-                    if !title.read().trim().is_empty() {
-                        button { class: "btn btn-small", onclick: move |_| create_click(), "Создать" }
-                    }
-                }
-                div { class: "field field-import",
-                    TextInput {
-                        reset: link_reset(),
-                        placeholder: if jira_ready { "Вставь ссылку на задачу Jira" } else { "Импорт из Jira" },
-                        label: "Ссылка на задачу Jira",
-                        spellcheck: false,
-                        on_input: move |v| link.set(v),
-                        on_keydown: move |e: KeyboardEvent| {
-                            if e.key() == Key::Enter && jira_ready {
-                                import_enter();
+                    match &draft {
+                        Draft::Empty => rsx! {},
+                        Draft::Jira(_, key) => rsx! {
+                            button {
+                                class: "btn btn-small btn-accent",
+                                disabled: !can_submit,
+                                onclick: move |_| submit_click(),
+                                "Импорт {key}"
+                            }
+                        },
+                        Draft::List(_, items) => rsx! {
+                            button {
+                                class: "btn btn-small",
+                                disabled: !can_submit,
+                                onclick: move |_| submit_click(),
+                                "Создать + {items.len()}"
+                            }
+                        },
+                        Draft::Text(_) => rsx! {
+                            button {
+                                class: "btn btn-small",
+                                disabled: !can_submit,
+                                onclick: move |_| submit_click(),
+                                "Создать"
                             }
                         },
                     }
-                    button {
-                        class: "btn btn-small",
-                        disabled: !link_valid || busy || !jira_ready,
-                        onclick: move |_| import_click(),
-                        "Импорт"
-                    }
                 }
-                if let Some(note) = jira_note {
-                    p { class: "import-note", role: "note",
-                        "{note} "
-                        Link { to: Route::Settings {}, "Подключить в настройках" }
-                    }
+                match &draft {
+                    Draft::Jira(_, key) => rsx! {
+                        p { class: "composer-hint", role: "note",
+                            if let Some(note) = jira_note {
+                                "{note} "
+                                Link { to: Route::Settings {}, "Подключить в настройках" }
+                            } else {
+                                "Задача Jira "
+                                b { "{key}" }
+                                ": подтянем название и чек-лист, строки станут пунктами."
+                            }
+                        }
+                    },
+                    Draft::List(title, items) => rsx! {
+                        p { class: "composer-hint",
+                            "Задача «"
+                            b { "{title}" }
+                            "» и {items.len()} {fmt::plural(items.len(), \"пункт\", \"пункта\", \"пунктов\")}. Первая строка — задача, остальные — пункты."
+                        }
+                    },
+                    _ => rsx! {},
                 }
             }
 
@@ -178,7 +248,7 @@ pub fn Tasks() -> Element {
                 div { class: "empty",
                     h2 { class: "empty-title", "Задач пока нет" }
                     p { class: "empty-text",
-                        "Напиши задачу в поле выше и нажми Enter или вставь ссылку на задачу Jira — пункты чек-листа станут шагами."
+                        "Напиши задачу и нажми Enter или вставь ссылку на задачу Jira — пункты чек-листа станут шагами. Несколько строк (Shift+Enter) — задача и её пункты."
                     }
                 }
             }
@@ -250,20 +320,14 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
 
     let api_add = api.clone();
     let mut add = move || {
-        let t = draft.peek().trim().to_string();
-        if t.is_empty() {
+        let Some(cmd) = add_items(id, &draft.peek()) else {
             adding.set(false);
             return;
-        }
-        run(
-            api_add.clone(),
-            app,
-            Command::Create(NewTask::child(id, t)),
-            move || {
-                draft.set(String::new());
-                draft_reset += 1;
-            },
-        );
+        };
+        run(api_add.clone(), app, cmd, move || {
+            draft.set(String::new());
+            draft_reset += 1;
+        });
     };
 
     rsx! {
@@ -310,16 +374,19 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
                     }
                     if adding() {
                         div { class: "item-add",
-                            TextInput {
+                            TextArea {
                                 reset: draft_reset(),
                                 refocus: true,
                                 class: "inline-input",
-                                placeholder: "Новый пункт — Enter, чтобы добавить",
+                                placeholder: "Новый пункт — Enter; несколько строк — несколько пунктов",
                                 label: "Новый пункт",
                                 autofocus: true,
                                 on_input: move |v| draft.set(v),
                                 on_keydown: move |e: KeyboardEvent| match e.key() {
-                                    Key::Enter => add(),
+                                    Key::Enter if !shift(&e) => {
+                                        e.prevent_default();
+                                        add();
+                                    }
                                     Key::Escape => {
                                         draft.set(String::new());
                                         adding.set(false);
@@ -494,20 +561,14 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
     let mut draft_reset = use_signal(|| 0u32);
     let api_add = api.clone();
     let mut add = move || {
-        let t = draft.peek().trim().to_string();
-        if t.is_empty() {
+        let Some(cmd) = add_items(id, &draft.peek()) else {
             adding.set(false);
             return;
-        }
-        run(
-            api_add.clone(),
-            app,
-            Command::Create(NewTask::child(id, t)),
-            move || {
-                draft.set(String::new());
-                draft_reset += 1;
-            },
-        );
+        };
+        run(api_add.clone(), app, cmd, move || {
+            draft.set(String::new());
+            draft_reset += 1;
+        });
     };
     let row = if in_work {
         "item-row in-work"
@@ -593,7 +654,7 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
         }
         if adding() {
             div { class: "item-add",
-                TextInput {
+                TextArea {
                     reset: draft_reset(),
                     refocus: true,
                     class: "inline-input",
@@ -602,7 +663,10 @@ fn ItemRow(item: TaskDto, loose: bool) -> Element {
                     autofocus: true,
                     on_input: move |v| draft.set(v),
                     on_keydown: move |e: KeyboardEvent| match e.key() {
-                        Key::Enter => add(),
+                        Key::Enter if !shift(&e) => {
+                            e.prevent_default();
+                            add();
+                        }
                         Key::Escape => {
                             draft.set(String::new());
                             adding.set(false);
@@ -636,5 +700,53 @@ fn Checkbox(checked: bool, label: String, on_toggle: EventHandler<bool>) -> Elem
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draft_kinds() {
+        assert_eq!(parse_draft("  \n "), Draft::Empty);
+        assert_eq!(
+            parse_draft(" Обновить README "),
+            Draft::Text("Обновить README".into())
+        );
+        assert_eq!(
+            parse_draft("https://jira.example.com/browse/PROJ-456"),
+            Draft::Jira(
+                "https://jira.example.com/browse/PROJ-456".into(),
+                "PROJ-456".into()
+            )
+        );
+        assert_eq!(
+            parse_draft("PROJ-7"),
+            Draft::Jira("PROJ-7".into(), "PROJ-7".into())
+        );
+        // Ключ внутри названия — это название, а не импорт.
+        assert_eq!(
+            parse_draft("Починить PROJ-12 до релиза"),
+            Draft::Text("Починить PROJ-12 до релиза".into())
+        );
+        assert_eq!(
+            parse_draft("Отчёт\n\n Схема \nМиграции\n"),
+            Draft::List("Отчёт".into(), vec!["Схема".into(), "Миграции".into()])
+        );
+    }
+
+    #[test]
+    fn add_items_by_lines() {
+        let id = TaskId::from(focus_api_types::Uuid::nil());
+        assert_eq!(add_items(id, " \n"), None);
+        assert_eq!(
+            add_items(id, "Один"),
+            Some(Command::Create(NewTask::child(id, "Один".to_string())))
+        );
+        assert_eq!(
+            add_items(id, "Один\nДва"),
+            Some(Command::CreateItems(id, vec!["Один".into(), "Два".into()]))
+        );
     }
 }

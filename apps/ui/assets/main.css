@@ -25,7 +25,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -1082,10 +1083,11 @@ kbd {
 
 /* Задачи */
 
+/* Одно поле: текст, ссылка Jira или несколько строк (задача + пункты). */
 .composer {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
   margin-bottom: var(--sp-6);
 }
 
@@ -1116,12 +1118,59 @@ kbd {
   color: var(--text);
 }
 
-.field input::placeholder {
+.field input::placeholder,
+.field textarea::placeholder {
   color: var(--text-3);
 }
 
-.field-import {
-  padding-left: var(--sp-4);
+/* Поле растёт по тексту: иконка и кнопка — у последней строки. */
+.field-new {
+  height: auto;
+  min-height: 44px;
+  align-items: flex-end;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.field-new > .icon {
+  margin-bottom: 7px;
+}
+
+.field textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 160px;
+  padding: 5px 0;
+  resize: none;
+  field-sizing: content;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  line-height: 22px;
+  box-shadow: none !important;
+}
+
+.composer-hint {
+  margin: 0;
+  padding: 0 var(--sp-1);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.composer-hint b {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.composer-hint a {
+  color: var(--work);
+  text-decoration: none;
+}
+
+.composer-hint a:hover {
+  text-decoration: underline;
 }
 
 .tree {
@@ -1525,13 +1574,20 @@ kbd {
 }
 
 .inline-input {
+  display: block;
   width: 100%;
-  height: 40px;
-  padding: 0 var(--sp-3);
+  min-height: 40px;
+  max-height: 160px;
+  padding: 8px var(--sp-3);
+  resize: none;
+  field-sizing: content;
   border-radius: var(--r-sm);
   background: var(--bg);
   border: 1px solid var(--line-strong);
   outline: none;
+  color: var(--text);
+  font: inherit;
+  line-height: 22px;
 }
 
 .inline-input:focus {
@@ -2485,23 +2541,6 @@ kbd {
   line-height: 1.5;
 }
 
-/* Подсказка под импортом в «Задачах», когда Jira не подключена */
-.import-note {
-  grid-column: 2;
-  margin: calc(-1 * var(--sp-1)) 0 0;
-  color: var(--text-3);
-  font-size: var(--fs-xs);
-}
-
-.import-note a {
-  color: var(--work);
-  text-decoration: none;
-}
-
-.import-note a:hover {
-  text-decoration: underline;
-}
-
 /* ───────── Планшет и телефон: экраны ───────── */
 
 @keyframes sheet-up {
@@ -2616,13 +2655,36 @@ kbd {
     max-height: min(340px, 50dvh);
   }
 
-  /* Задачи */
-  .composer {
-    grid-template-columns: minmax(0, 1fr);
+  /* Задачи: поле ввода прилипает к низу, над вкладками — под большим пальцем */
+  .page.tasks {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    padding-bottom: 0;
   }
 
-  .import-note {
-    grid-column: 1;
+  .page.tasks > .tree,
+  .page.tasks > .empty {
+    order: 1;
+  }
+
+  .page.tasks > .tree {
+    padding-bottom: var(--sp-4);
+  }
+
+  .composer {
+    order: 2;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: auto calc(-1 * var(--sp-4)) 0;
+    padding: var(--sp-2) var(--sp-4) var(--sp-3);
+    background: var(--bg-sidebar);
+    border-top: 1px solid var(--line);
+  }
+
+  .field textarea {
+    font-size: var(--fs-lg);
   }
 
   .item-text {

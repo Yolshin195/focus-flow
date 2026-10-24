@@ -7,6 +7,8 @@ edition = "2021"
 dioxus = { workspace = true, features = ["router"] }
 ui = { workspace = true }
 notify-rust = "4.11.7"
+# Каталог данных сервиса — чтобы найти файл `token` (та же версия, что у сервиса).
+directories = "6.0.0"
 
 [features]
 default = ["desktop"]

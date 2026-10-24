@@ -14,7 +14,7 @@ pub mod state;
 
 use dioxus::prelude::*;
 
-pub use api::{ApiHandle, FocusApi, MockApi, MockScenario};
+pub use api::{ApiHandle, FocusApi, HttpApi, MockApi, MockScenario};
 pub use platform::{NoopPlatform, Platform, PlatformHandle};
 pub use state::UiPreset;
 

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 
 use crate::components::Icon;
 use crate::fmt;
-use crate::state::{use_app, UiPreset};
+use crate::state::{use_app, Conn, UiPreset};
 use crate::Route;
 
 /// Общий layout всех экранов.
@@ -29,7 +29,13 @@ pub fn Layout() -> Element {
         .map(|s| (s.worked_today_sec, s.target_sec))
         .unwrap_or((0, 8 * 3600));
     let pct = (worked as f64 / target.max(1) as f64 * 100.0).min(100.0);
-    let error = app.error.read().clone();
+    let conn = app.conn.read().clone();
+    // Пока нет связи, тост «Нет связи…» не нужен — об этом говорит плашка.
+    let error = app
+        .error
+        .read()
+        .clone()
+        .filter(|_| !matches!(conn, Conn::Offline | Conn::Unauthorized));
 
     rsx! {
         div { class: "shell",
@@ -54,6 +60,7 @@ pub fn Layout() -> Element {
                 }
             }
             main { class: "screen",
+                ConnBanner { conn }
                 Outlet::<Route> {}
             }
             if let Some(err) = error {
@@ -77,6 +84,33 @@ fn NavItem(to: Route, icon: Icon, label: &'static str) -> Element {
         Link { class: "nav-item", active_class: "active", to,
             {icon.render(20)}
             span { class: "nav-label", "{label}" }
+        }
+    }
+}
+
+/// Плашка «Нет связи с сервисом»: тонкая полоса сверху экрана, не мешает
+/// смотреть последние данные. Переподключение идёт само.
+#[component]
+fn ConnBanner(conn: Conn) -> Element {
+    let (title, hint, cmd) = match conn {
+        Conn::Offline => (
+            "Нет связи с сервисом",
+            "Переподключаюсь… Запусти:",
+            "focus-flow serve",
+        ),
+        Conn::Unauthorized => (
+            "Сервис не принял токен",
+            "Проверь FOCUS_TOKEN или файл токена:",
+            "focus-flow token",
+        ),
+        Conn::Unknown | Conn::Online => return rsx! {},
+    };
+    rsx! {
+        div { class: "conn-banner", role: "status",
+            span { class: "conn-dot" }
+            span { class: "conn-title", "{title}" }
+            span { class: "conn-hint", "{hint}" }
+            code { class: "conn-cmd", "{cmd}" }
         }
     }
 }

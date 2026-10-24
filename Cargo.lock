@@ -1872,6 +1872,18 @@ dependencies = [
 [[package]]
 name = "focus-core"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "focus-api-contract-tests",
+ "focus-api-types",
+ "futures-executor",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
 
 [[package]]
 name = "focus-flow"

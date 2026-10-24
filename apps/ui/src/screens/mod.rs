@@ -2,6 +2,7 @@
 
 mod day;
 mod focus;
+mod item_card;
 mod settings;
 mod tasks;
 

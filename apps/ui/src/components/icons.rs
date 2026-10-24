@@ -15,6 +15,8 @@ pub enum Icon {
     Chevron,
     /// Плюс.
     Plus,
+    /// Минус.
+    Minus,
     /// Поиск.
     Search,
     /// Галочка.
@@ -31,6 +33,10 @@ pub enum Icon {
     Plan,
     /// Настройки — ползунки.
     Settings,
+    /// Ещё — три точки.
+    More,
+    /// Заметка — лист с строками.
+    Note,
 }
 
 #[component]
@@ -81,6 +87,9 @@ impl Icon {
             Icon::Plus => rsx! {
                 Svg { size, path { d: "M10 4.5v11M4.5 10h11" } }
             },
+            Icon::Minus => rsx! {
+                Svg { size, path { d: "M4.5 10h11" } }
+            },
             Icon::Search => rsx! {
                 Svg { size,
                     circle { cx: "9", cy: "9", r: "5" }
@@ -121,6 +130,19 @@ impl Icon {
             },
             Icon::Play => rsx! {
                 Svg { size, path { d: "M7 5l8 5-8 5z" } }
+            },
+            Icon::More => rsx! {
+                Svg { size,
+                    circle { cx: "5", cy: "10", r: "0.9" }
+                    circle { cx: "10", cy: "10", r: "0.9" }
+                    circle { cx: "15", cy: "10", r: "0.9" }
+                }
+            },
+            Icon::Note => rsx! {
+                Svg { size,
+                    rect { x: "5", y: "3.5", width: "10", height: "13", rx: "1.5" }
+                    path { d: "M8 8h4M8 11h4M8 14h2" }
+                }
             },
         }
     }

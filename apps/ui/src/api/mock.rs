@@ -238,10 +238,24 @@ impl MockApi {
             "Не выводить пароль приложения в историю чата",
             "Останавливать прогон при повторяющемся сбое",
             "Подключить LLM-роутер с вопросом о системе",
+            "Проверить, что при повторном импорте задачи из Jira новые строки чек-листа догружаются без дублей, а изменённые строки сопоставляются по тексту и не теряют статус",
         ]
         .iter()
         .map(|t| add(&mut s, Some(jira), t, None))
         .collect();
+        // Оценки, «на сегодня» и заметка — чтобы демо показывало их в списке.
+        let today = local_date(t0);
+        for (i, est, planned) in [(2, 1, true), (3, 2, true), (4, 1, false), (5, 2, false)] {
+            if let Some(t) = s.tasks.iter_mut().find(|t| t.id == items[i]) {
+                t.estimate_intervals = Some(est);
+                t.planned_for = planned.then_some(today);
+            }
+        }
+        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == items[5]) {
+            t.notes = Some(
+                "После правки строки в Jira пункт задвоился. Проверить на копии чек-листа.".into(),
+            );
+        }
         let inbox = add(&mut s, None, "Разобрать входящие письма", None);
         add(&mut s, None, "Подготовить план на неделю", None);
 

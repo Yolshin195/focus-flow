@@ -590,10 +590,28 @@ pub enum Command {
     StartRest,
     /// Создать задачу или пункт.
     Create(NewTask),
+    /// Создать задачу и сразу её пункты (вставка списком).
+    CreateWithItems(NewTask, Vec<String>),
+    /// Добавить к задаче несколько пунктов.
+    CreateItems(TaskId, Vec<String>),
     /// Отметить готовым / вернуть в план.
     SetDone(TaskId, bool),
+    /// Правка пункта из карточки: текст, заметка, оценка, день, статус.
+    Update(TaskId, TaskPatch),
     /// Импорт по ссылке.
     Import(String),
+}
+
+/// Пункты по одному, по порядку: первая ошибка останавливает остальные.
+async fn create_items(
+    api: &ApiHandle,
+    parent: TaskId,
+    titles: Vec<String>,
+) -> Result<(), ApiError> {
+    for t in titles {
+        api.0.create_task(NewTask::child(parent, t)).await?;
+    }
+    Ok(())
 }
 
 /// Выполнить команду. `on_ok` вызывается после успеха.
@@ -607,7 +625,10 @@ pub fn run(api: ApiHandle, mut state: AppState, cmd: Command, on_ok: impl FnOnce
         let tasks_changed = matches!(
             cmd,
             Command::Create(_)
+                | Command::CreateWithItems(..)
+                | Command::CreateItems(..)
                 | Command::SetDone(..)
+                | Command::Update(..)
                 | Command::Import(_)
                 | Command::Done(_)
                 | Command::StartWork(_)
@@ -620,6 +641,11 @@ pub fn run(api: ApiHandle, mut state: AppState, cmd: Command, on_ok: impl FnOnce
             Command::Stop => api.0.stop().await.map(drop),
             Command::StartRest => api.0.start_rest().await.map(drop),
             Command::Create(t) => api.0.create_task(t).await.map(drop),
+            Command::CreateWithItems(t, items) => match api.0.create_task(t).await {
+                Ok(task) => create_items(&api, task.id, items).await,
+                Err(e) => Err(e),
+            },
+            Command::CreateItems(parent, items) => create_items(&api, parent, items).await,
             Command::SetDone(id, done) => {
                 let status = if done {
                     TaskStatus::Done
@@ -632,6 +658,7 @@ pub fn run(api: ApiHandle, mut state: AppState, cmd: Command, on_ok: impl FnOnce
                 };
                 api.0.update_task(id, patch).await.map(drop)
             }
+            Command::Update(id, patch) => api.0.update_task(id, patch).await.map(drop),
             Command::Import(url) => api.0.import(url).await.map(drop),
         };
         match result {

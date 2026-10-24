@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <title>{app_title}</title>
     <meta name="description" content="Трекер фокуса 50/10: 50 минут работы над одним пунктом, 10 минут отдыха и честный учёт потерянного времени. Демо в браузере — без регистрации и без сервера.">
     <meta name="theme-color" content="#0f1115">
@@ -138,6 +138,8 @@
       --t-slow: 900ms;
 
       --sidebar-w: 76px;
+      /* Нижние вкладки на телефоне (без отступа под жест «домой») */
+      --tabbar-h: 56px;
       --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(233, 235, 239, 0.55);
     }
 
@@ -160,7 +162,8 @@
       overflow: hidden;
     }
     button,
-    input {
+    input,
+    textarea {
       font: inherit;
       color: inherit;
     }
@@ -187,9 +190,9 @@
     }
     .shell {
       display: grid;
-      grid-template-columns: var(--sidebar-w) 1fr;
+      grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
       height: 100vh;
-      min-width: 960px;
+      height: 100dvh;
     }
     .sidebar {
       display: flex;
@@ -290,7 +293,9 @@
       position: relative;
       min-width: 0;
       height: 100vh;
-      overflow: auto;
+      height: 100dvh;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
     .btn {
       display: inline-flex;
@@ -343,6 +348,7 @@
       min-height: 100%;
       padding: var(--sp-6) var(--sp-10) var(--sp-8);
       isolation: isolate;
+      overflow: hidden;
     }
     .focus::before {
       content: "";
@@ -595,6 +601,150 @@
 
       .lost-note {
         margin-top: var(--sp-2);
+      }
+    }
+    @media (max-width: 639px) {
+      .shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+      }
+
+      .screen {
+        grid-row: 1;
+        height: auto;
+        min-height: 0;
+      }
+
+      .sidebar {
+        grid-row: 2;
+        position: relative;
+        flex-direction: row;
+        align-items: stretch;
+        gap: 0;
+        padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+        border-right: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .brand {
+        display: none;
+      }
+
+      .nav {
+        flex: 3 1 0;
+        flex-direction: row;
+        gap: 0;
+        padding: 0;
+      }
+
+      .nav-bottom {
+        flex: 1 1 0;
+        margin-top: 0;
+      }
+
+      .nav-item {
+        flex: 1 1 0;
+        justify-content: center;
+        gap: 3px;
+        min-height: var(--tabbar-h);
+        padding: 6px 0 4px;
+        border-radius: 0;
+      }
+
+      .nav-item:hover,
+      .nav-item.active {
+        background: none;
+      }
+
+      .nav-item.active .icon {
+        color: var(--work);
+      }
+
+      .side-progress {
+        position: absolute;
+        top: -1px;
+        left: 0;
+        right: 0;
+        margin: 0;
+        padding: 0;
+        pointer-events: none;
+      }
+
+      .side-progress-value,
+      .side-progress-of {
+        display: none;
+      }
+
+      .side-progress-bar {
+        height: 2px;
+        margin-top: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      .focus {
+        padding: var(--sp-4) var(--sp-4) var(--sp-5);
+      }
+
+      .focus::before {
+        width: 150vw;
+        height: 150vw;
+      }
+
+      .focus-top {
+        gap: var(--sp-4);
+        min-height: 0;
+      }
+
+      .norm {
+        flex: none;
+        width: 136px;
+      }
+
+      .focus-stage {
+        justify-content: flex-start;
+        padding: var(--sp-6) 0 0;
+      }
+
+      .session-label {
+        margin-bottom: var(--sp-3);
+      }
+
+      .ring {
+        width: min(76vw, 300px, 40dvh);
+        height: min(76vw, 300px, 40dvh);
+      }
+
+      .ring-digits {
+        font-size: clamp(48px, 15vw, 64px);
+      }
+
+      .focus-context {
+        min-height: 0;
+        margin-top: var(--sp-5);
+      }
+
+      .item-title {
+        font-size: var(--fs-lg);
+        -webkit-line-clamp: 3;
+      }
+
+      .focus-actions {
+        align-self: stretch;
+        margin-top: auto;
+        padding-top: var(--sp-5);
+      }
+
+      .focus-actions .btn-primary {
+        width: 100%;
+        min-width: 0;
+      }
+    }
+
+    /* Сенсорный экран: подсказки клавиатуры не нужны. */
+    @media (hover: none) and (pointer: coarse) {
+      .key-hint {
+        display: none;
       }
     }
     .app:not(.motion) *,

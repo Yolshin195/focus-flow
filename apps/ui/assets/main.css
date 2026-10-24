@@ -694,6 +694,25 @@ button:disabled {
   min-height: 48px;
 }
 
+.key-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+kbd {
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
 .lost-note {
   display: inline-flex;
   align-items: center;

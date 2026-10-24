@@ -4,13 +4,18 @@ use dioxus::prelude::*;
 
 /// Диалог. `on_close` — по Esc и клику по фону.
 #[component]
-pub fn Dialog(title: String, children: Element, on_close: EventHandler<()>) -> Element {
+pub fn Dialog(
+    title: String,
+    children: Element,
+    on_close: EventHandler<()>,
+    #[props(default)] wide: bool,
+) -> Element {
     rsx! {
         div {
             class: "scrim",
             onclick: move |_| on_close.call(()),
             div {
-                class: "dialog",
+                class: if wide { "dialog dialog-wide" } else { "dialog" },
                 role: "dialog",
                 "aria-modal": "true",
                 "aria-label": "{title}",

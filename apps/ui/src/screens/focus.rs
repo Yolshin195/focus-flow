@@ -404,6 +404,13 @@ pub fn Focus() -> Element {
                     }
                 }
 
+                if let Some(hint) = key_hint(&view, selected.is_some()) {
+                    div { class: "key-hint",
+                        kbd { "Пробел" }
+                        span { "{hint}" }
+                    }
+                }
+
                 if let Some(min) = lost_min {
                     div { class: "lost-note",
                         span { class: "lost-dot" }
@@ -414,7 +421,7 @@ pub fn Focus() -> Element {
             }
 
             if (app.done_choice)() && matches!(view, View::Work { .. }) {
-                Dialog { title: "Пункт готов", on_close: move |_| app.done_choice.set(false),
+                Dialog { title: "Пункт готов", wide: true, on_close: move |_| app.done_choice.set(false),
                     div { class: "dialog-body",
                         h2 { class: "dialog-title", "Пункт готов" }
                         if let Some(item) = &work_item {
@@ -442,7 +449,7 @@ pub fn Focus() -> Element {
             }
 
             if (app.interrupt_dialog)() && matches!(view, View::Work { .. }) {
-                Dialog { title: "Прервать работу?", on_close: move |_| app.interrupt_dialog.set(false),
+                Dialog { title: "Прервать работу?", wide: true, on_close: move |_| app.interrupt_dialog.set(false),
                     div { class: "dialog-body",
                         h2 { class: "dialog-title", "Прервать работу?" }
                         p { class: "dialog-warning", "Ты отвлекаешься. Эти 50 минут тебя ни для кого нет." }
@@ -506,5 +513,16 @@ fn PickerFooter() -> Element {
                 "Начать 50 минут"
             }
         }
+    }
+}
+
+/// Подсказка к главному действию по Пробелу/Enter.
+fn key_hint(view: &View, item_chosen: bool) -> Option<&'static str> {
+    match view {
+        View::Idle if item_chosen => Some("начать"),
+        View::Idle => Some("выбрать пункт"),
+        View::Work { .. } => Some("готово"),
+        View::Planning { .. } => Some("начать работу"),
+        View::Rest { .. } | View::Loading => None,
     }
 }

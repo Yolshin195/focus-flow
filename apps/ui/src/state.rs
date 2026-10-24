@@ -496,6 +496,8 @@ pub enum Command {
     Interrupt,
     /// «Стоп» планирования.
     Stop,
+    /// Отдых (после планирования).
+    StartRest,
     /// Создать задачу или пункт.
     Create(NewTask),
     /// Отметить готовым / вернуть в план.
@@ -526,6 +528,7 @@ pub fn run(api: ApiHandle, mut state: AppState, cmd: Command, on_ok: impl FnOnce
             Command::Done(next) => api.0.done(next).await.map(drop),
             Command::Interrupt => api.0.interrupt().await.map(drop),
             Command::Stop => api.0.stop().await.map(drop),
+            Command::StartRest => api.0.start_rest().await.map(drop),
             Command::Create(t) => api.0.create_task(t).await.map(drop),
             Command::SetDone(id, done) => {
                 let status = if done {

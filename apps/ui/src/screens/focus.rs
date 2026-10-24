@@ -277,6 +277,7 @@ pub fn Focus() -> Element {
     let api_a = api.clone();
     let api_b = api.clone();
     let api_c = api.clone();
+    let api_rest = api.clone();
     let api_d = api.clone();
     let api_e = api.clone();
     let api_f = api.clone();
@@ -396,11 +397,20 @@ pub fn Focus() -> Element {
                                 onclick: move |_| app.picker_open.set(true),
                                 "Начать работу"
                             }
-                            button {
-                                class: "btn btn-quiet",
-                                disabled: busy,
-                                onclick: move |_| run(api_c.clone(), app, Command::Stop, || {}),
-                                "Стоп"
+                            div { class: "quiet-row",
+                                button {
+                                    class: "btn btn-quiet",
+                                    disabled: busy,
+                                    title: "Закончить планирование и отдохнуть — без потерянного времени",
+                                    onclick: move |_| run(api_rest.clone(), app, Command::StartRest, || {}),
+                                    "Отдых"
+                                }
+                                button {
+                                    class: "btn btn-quiet",
+                                    disabled: busy,
+                                    onclick: move |_| run(api_c.clone(), app, Command::Stop, || {}),
+                                    "Стоп"
+                                }
                             }
                         },
                         View::Rest { .. } | View::Loading => rsx! {},

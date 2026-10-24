@@ -262,6 +262,12 @@ button:disabled {
   background: var(--surface-2);
 }
 
+.quiet-row {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: center;
+}
+
 .btn-danger {
   color: var(--interrupted);
 }

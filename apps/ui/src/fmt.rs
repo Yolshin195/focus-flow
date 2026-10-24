@@ -2,6 +2,9 @@
 
 use focus_api_types::chrono::{DateTime, Datelike, Local, NaiveDate, Utc, Weekday};
 
+/// Неразрывный пробел: пустая строка той же высоты, пока нет данных.
+pub const NBSP: &str = "\u{a0}";
+
 /// Таймер: `MM:SS`, от часа — `H:MM:SS`.
 pub fn clock(sec: i64) -> String {
     let sec = sec.max(0);

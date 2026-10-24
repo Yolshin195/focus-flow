@@ -381,6 +381,11 @@ button:disabled {
   box-shadow: inset 3px 0 0 var(--interrupted), inset 0 0 0 1px var(--interrupted-soft);
 }
 
+/* Место занято, содержимого ещё нет: строка появится без сдвига раскладки. */
+.reserved {
+  visibility: hidden;
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -665,7 +670,7 @@ button:disabled {
   transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
 
-.item-field:hover {
+.item-field:enabled:hover {
   background: var(--surface-2);
 }
 
@@ -1635,6 +1640,14 @@ kbd {
   .total-value {
     font-size: var(--fs-xl);
   }
+}
+
+/* Переходы — только после кадра с данными (класс `motion` ставит `App`):
+   при запуске циферблат, полосы и свечение сразу в итоговом состоянии. */
+.app:not(.motion) *,
+.app:not(.motion) *::before,
+.app:not(.motion) *::after {
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

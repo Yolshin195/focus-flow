@@ -208,8 +208,17 @@ pub fn Focus() -> Element {
 
     // Циферблат: по риске на минуту. Отсчёт вниз — горят оставшиеся минуты,
     // планирование — загораются прошедшие (круг — 50 минут, дальше заново).
+    // До данных — тот же циферблат, что в простое, но без цифр и подписей:
+    // строки пустые, но той же высоты, поэтому ничего не сдвигается.
     let (label, tone, ticks, lit, digits, sub) = match &view {
-        View::Loading => ("", RingTone::Idle, 50, 0.0, "--:--".to_string(), ""),
+        View::Loading => (
+            fmt::NBSP,
+            RingTone::Idle,
+            50,
+            1.0,
+            fmt::NBSP.to_string(),
+            fmt::NBSP,
+        ),
         View::Idle => (
             "Готов к работе",
             RingTone::Idle,
@@ -274,6 +283,12 @@ pub fn Focus() -> Element {
         _ => None,
     };
 
+    // До данных место подсказки и строки «Потеряно» занято (`reserved`), как в
+    // простое: когда они появятся, циферблат не сдвинется.
+    let loading = view == View::Loading;
+    let hint = key_hint(&view, selected.is_some()).or(loading.then_some("выбрать пункт"));
+    let lost_min = lost_min.or(loading.then_some(0));
+
     let api_a = api.clone();
     let api_b = api.clone();
     let api_c = api.clone();
@@ -287,7 +302,9 @@ pub fn Focus() -> Element {
         div { class: "focus focus-{tone.class()}",
             header { class: "focus-top",
                 div { class: "day-meta",
-                    if let Some(t) = day_started {
+                    if loading {
+                        span { class: "day-started", {fmt::NBSP} }
+                    } else if let Some(t) = day_started {
                         span { class: "day-started", "День начат в " span { class: "num", "{t}" } }
                     } else {
                         span { class: "day-started", "День ещё не начат" }
@@ -295,9 +312,13 @@ pub fn Focus() -> Element {
                 }
                 div { class: "norm",
                     div { class: "norm-text",
-                        span { class: "num norm-worked", "{fmt::hm(worked)}" }
-                        span { class: "norm-of", " из " }
-                        span { class: "num", "{fmt::hm(target)}" }
+                        if loading {
+                            {fmt::NBSP}
+                        } else {
+                            span { class: "num norm-worked", "{fmt::hm(worked)}" }
+                            span { class: "norm-of", " из " }
+                            span { class: "num", "{fmt::hm(target)}" }
+                        }
                     }
                     NormBar { segments, target_sec: target }
                 }
@@ -352,7 +373,10 @@ pub fn Focus() -> Element {
                                 }
                             }
                         },
-                        View::Loading => rsx! {},
+                        // Пустое поле того же размера; не кнопка — нажать пока нечего.
+                        View::Loading => rsx! {
+                            div { class: "item-field", "aria-hidden": "true" }
+                        },
                     }
                 }
 
@@ -413,19 +437,24 @@ pub fn Focus() -> Element {
                                 }
                             }
                         },
-                        View::Rest { .. } | View::Loading => rsx! {},
+                        // Кнопки простоя, неактивные до данных; «Планировать» только держит место.
+                        View::Loading => rsx! {
+                            button { class: "btn btn-primary btn-work", disabled: true, "Начать 50 минут" }
+                            button { class: "btn btn-quiet reserved", disabled: true, "Планировать" }
+                        },
+                        View::Rest { .. } => rsx! {},
                     }
                 }
 
-                if let Some(hint) = key_hint(&view, selected.is_some()) {
-                    div { class: "key-hint",
+                if let Some(hint) = hint {
+                    div { class: if loading { "key-hint reserved" } else { "key-hint" },
                         kbd { "Пробел" }
                         span { "{hint}" }
                     }
                 }
 
                 if let Some(min) = lost_min {
-                    div { class: "lost-note",
+                    div { class: if loading { "lost-note reserved" } else { "lost-note" },
                         span { class: "lost-dot" }
                         "Потеряно: "
                         span { class: "num", "{min} мин" }

@@ -42,9 +42,11 @@
   --interrupted: #d9686e;
   --interrupted-soft: rgba(217, 104, 110, 0.14);
 
-  /* Шрифты */
-  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-num: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  /* Шрифты. «… Fallback» — системные шрифты с метриками под Inter и
+     JetBrains Mono (объявлены в index.html веб-версии): пока грузятся
+     настоящие, текст не меняет размеров. На desktop их нет — пропускаются. */
+  --font-ui: "Inter", "Inter Fallback", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "JetBrains Mono", "JetBrains Mono Fallback", ui-monospace, "SF Mono", monospace;
 
   /* Шкала размеров (≈ 1.2) */
   --fs-xs: 12px;

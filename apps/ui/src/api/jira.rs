@@ -1,5 +1,6 @@
 //! Настройки плагина Jira: `GET`/`PUT /api/plugins/jira/settings`,
-//! `POST /api/plugins/jira/test`.
+//! `POST /api/plugins/jira/test`; очередь отправки: `GET /queue`,
+//! `POST /queue/send`, `DELETE /queue/{id}` (там же, `/api/plugins/jira`).
 //!
 //! Это маршруты плагина, а не ядра, поэтому они не входят в `FocusApi`
 //! (контракт `api-types`): отдельный трейт [`JiraSettingsApi`] с реализациями
@@ -9,6 +10,7 @@
 use std::cell::RefCell;
 
 use async_trait::async_trait;
+use focus_api_types::chrono::{DateTime, Duration, Utc};
 use focus_api_types::{ApiError, ApiResult};
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +71,10 @@ pub struct JiraState {
     pub worklog: JiraWorklog,
     /// Токен сохранён.
     pub has_token: bool,
+    /// Отправлять очередь сразу (иначе — кнопкой).
+    pub auto_send: bool,
+    /// Сколько операций ждут отправки.
+    pub queue_pending: u64,
     /// Последняя ошибка обращения к Jira.
     pub last_error: Option<String>,
 }
@@ -87,6 +93,8 @@ pub struct JiraPatch {
     pub checklist_field_id: String,
     /// Что списывать.
     pub worklog: JiraWorklog,
+    /// Отправлять очередь сразу.
+    pub auto_send: bool,
     /// Новый токен; не передаётся, если `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
@@ -104,6 +112,62 @@ pub struct JiraTestResult {
     pub base_url: String,
 }
 
+/// Что плагин собирается сделать в Jira.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JiraOpKind {
+    /// Добавить строку `- текст` в чек-лист.
+    ChecklistAdd,
+    /// Отметить строку `+ текст`.
+    ChecklistDone,
+    /// Записать worklog.
+    Worklog,
+    /// Вид из более новой версии сервиса.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Операция в очереди отправки.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct JiraOp {
+    /// Id записи (для удаления).
+    pub id: i64,
+    /// Что сделать.
+    pub kind: JiraOpKind,
+    /// Задача Jira.
+    pub issue_key: String,
+    /// Текст пункта или комментарий worklog.
+    pub text: String,
+    /// Worklog: начало.
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+    /// Worklog: длительность, с.
+    #[serde(default)]
+    pub seconds: Option<i64>,
+    /// Когда попала в очередь.
+    pub created_at: DateTime<Utc>,
+    /// Неудачных попыток.
+    #[serde(default)]
+    pub attempts: i64,
+    /// Последняя ошибка отправки.
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+/// Очередь отправки: ответ `GET /queue`, `POST /queue/send`, `DELETE /queue/{id}`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default)]
+pub struct JiraQueue {
+    /// Автоотправка включена.
+    pub auto_send: bool,
+    /// Ждущие операции по порядку.
+    pub items: Vec<JiraOp>,
+    /// Только после отправки: сколько прошло.
+    pub sent: Option<u64>,
+    /// Только после отправки: на чём остановилась.
+    pub error: Option<String>,
+}
+
 /// Настройки плагина Jira.
 #[async_trait(?Send)]
 pub trait JiraSettingsApi {
@@ -113,13 +177,20 @@ pub trait JiraSettingsApi {
     async fn save_jira_settings(&self, patch: JiraPatch) -> ApiResult<JiraState>;
     /// Проверить подключение (`GET /rest/api/2/myself` в Jira).
     async fn test_jira(&self) -> ApiResult<JiraTestResult>;
+    /// Очередь отправки.
+    async fn jira_queue(&self) -> ApiResult<JiraQueue>;
+    /// Отправить очередь сейчас.
+    async fn send_jira_queue(&self) -> ApiResult<JiraQueue>;
+    /// Не отправлять операцию `id`.
+    async fn drop_jira_op(&self, id: i64) -> ApiResult<JiraQueue>;
 }
 
 /// Мок настроек Jira для демо и тестов: всё в памяти, проверка «подключается»,
-/// если плагин настроен.
+/// если плагин настроен, отправка очереди всегда проходит.
 #[derive(Debug, Default)]
 pub struct MockJira {
     state: RefCell<JiraState>,
+    queue: RefCell<Vec<JiraOp>>,
 }
 
 impl MockJira {
@@ -132,6 +203,18 @@ impl MockJira {
 
     /// Настроенный демо-плагин (`https://jira.example.com`, токен сохранён).
     pub fn demo() -> Self {
+        let now = Utc::now();
+        let op = |id, kind, text: &str, ago_min, seconds: Option<i64>| JiraOp {
+            id,
+            kind,
+            issue_key: "FF-12".into(),
+            text: text.into(),
+            started_at: seconds.map(|s| now - Duration::minutes(ago_min) - Duration::seconds(s)),
+            seconds,
+            created_at: now - Duration::minutes(ago_min),
+            attempts: 0,
+            last_error: None,
+        };
         let m = Self {
             state: RefCell::new(JiraState {
                 base_url: Some("https://jira.example.com".into()),
@@ -139,9 +222,40 @@ impl MockJira {
                 checklist_field_resolved: Some("customfield_10100".into()),
                 ..JiraState::default()
             }),
+            queue: RefCell::new(vec![
+                op(
+                    1,
+                    JiraOpKind::ChecklistAdd,
+                    "Проверить экспорт отчёта",
+                    95,
+                    None,
+                ),
+                op(
+                    2,
+                    JiraOpKind::Worklog,
+                    "Проверить экспорт отчёта",
+                    40,
+                    Some(50 * 60),
+                ),
+                op(
+                    3,
+                    JiraOpKind::ChecklistDone,
+                    "Проверить экспорт отчёта",
+                    40,
+                    None,
+                ),
+            ]),
         };
         m.recompute();
         m
+    }
+
+    fn queue_now(&self) -> JiraQueue {
+        JiraQueue {
+            auto_send: self.state.borrow().auto_send,
+            items: self.queue.borrow().clone(),
+            ..JiraQueue::default()
+        }
     }
 
     fn recompute(&self) {
@@ -157,6 +271,7 @@ impl MockJira {
             None
         };
         s.configured = s.problem.is_none();
+        s.queue_pending = self.queue.borrow().len() as u64;
     }
 }
 
@@ -191,6 +306,7 @@ impl JiraSettingsApi for MockJira {
                 .clone()
                 .or_else(|| s.base_url.as_ref().map(|_| "customfield_10100".into()));
             s.worklog = patch.worklog;
+            s.auto_send = patch.auto_send;
             if let Some(t) = patch.token {
                 s.has_token = !t.trim().is_empty();
             }
@@ -209,6 +325,28 @@ impl JiraSettingsApi for MockJira {
             user: "Демо Пользователь".into(),
             base_url: s.base_url.clone().unwrap_or_default(),
         })
+    }
+
+    async fn jira_queue(&self) -> ApiResult<JiraQueue> {
+        Ok(self.queue_now())
+    }
+
+    async fn send_jira_queue(&self) -> ApiResult<JiraQueue> {
+        if let Some(why) = self.state.borrow().problem.clone() {
+            return Err(ApiError::Validation(format!("Jira не настроена: {why}")));
+        }
+        let sent = self.queue.borrow_mut().drain(..).count() as u64;
+        self.recompute();
+        Ok(JiraQueue {
+            sent: Some(sent),
+            ..self.queue_now()
+        })
+    }
+
+    async fn drop_jira_op(&self, id: i64) -> ApiResult<JiraQueue> {
+        self.queue.borrow_mut().retain(|op| op.id != id);
+        self.recompute();
+        Ok(self.queue_now())
     }
 }
 
@@ -280,5 +418,34 @@ mod tests {
         .unwrap();
         assert!(s.configured && s.has_token);
         assert!(block_on(m.test_jira()).unwrap().ok);
+    }
+
+    #[test]
+    fn queue_parses_plugin_json() {
+        let json = r#"{"auto_send":false,"items":[
+            {"id":3,"kind":"worklog","ref_id":"s","issue_key":"ABC-1","text":"пункт",
+             "started_at":"2026-10-24T09:00:00Z","seconds":1200,"created_at":"2026-10-24T09:20:00Z",
+             "attempts":1,"last_error":"Jira отклонила запрос (400)","last_error_at":"2026-10-24T09:21:00Z"},
+            {"id":4,"kind":"new_kind","issue_key":"ABC-1","text":"x","created_at":"2026-10-24T09:20:00Z"}
+        ],"sent":0,"error":"ABC-1: Jira отклонила запрос (400)"}"#;
+        let q: JiraQueue = serde_json::from_str(json).unwrap();
+        assert_eq!(q.items.len(), 2);
+        assert_eq!(q.items[0].kind, JiraOpKind::Worklog);
+        assert_eq!(q.items[0].seconds, Some(1200));
+        assert_eq!(q.items[1].kind, JiraOpKind::Unknown);
+        assert_eq!(q.sent, Some(0));
+    }
+
+    #[test]
+    fn mock_queue_drop_and_send() {
+        let m = MockJira::demo();
+        assert_eq!(block_on(m.jira_settings()).unwrap().queue_pending, 3);
+        let q = block_on(m.drop_jira_op(2)).unwrap();
+        assert_eq!(q.items.iter().map(|o| o.id).collect::<Vec<_>>(), [1, 3]);
+        let q = block_on(m.send_jira_queue()).unwrap();
+        assert_eq!(q.sent, Some(2));
+        assert!(q.items.is_empty());
+        assert_eq!(block_on(m.jira_settings()).unwrap().queue_pending, 0);
+        assert!(block_on(MockJira::unconfigured().send_jira_queue()).is_err());
     }
 }

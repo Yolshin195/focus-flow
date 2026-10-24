@@ -11,6 +11,7 @@
 
 mod checklist;
 mod client;
+mod queue;
 mod routes;
 mod settings;
 
@@ -29,11 +30,14 @@ use focus_plugin_api::{
 use serde_json::{Value, json};
 use sqlx::Row as _;
 
+use crate::queue::NewOp;
+
 pub use checklist::{Line, Marker};
 pub use client::{
     Field, FieldSchema, Issue, Jira, JiraError, checklist_text, jira_time, pick_checklist_field,
     worklog_body,
 };
+pub use queue::{Op, OpKind};
 pub use settings::{Conn, JiraSettings, Mode, TOKEN_SECRET, WorklogSettings, validate_base_url};
 
 /// Id плагина.
@@ -62,6 +66,17 @@ struct Inner {
     last_error: Mutex<Option<String>>,
     /// «Не настроен» уже записано в лог (до следующей смены настроек).
     unconfigured_logged: AtomicBool,
+    /// Отправка очереди — по одной за раз (кнопка и автоотправка).
+    flush: tokio::sync::Mutex<()>,
+}
+
+/// Итог отправки очереди.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct FlushResult {
+    /// Сколько операций прошло.
+    pub sent: usize,
+    /// Ошибка, на которой отправка остановилась.
+    pub error: Option<String>,
 }
 
 impl Default for JiraPlugin {
@@ -86,6 +101,7 @@ impl JiraPlugin {
                 ctx: OnceLock::new(),
                 last_error: Mutex::default(),
                 unconfigured_logged: AtomicBool::new(false),
+                flush: tokio::sync::Mutex::new(()),
             }),
         }
     }
@@ -188,29 +204,46 @@ impl JiraPlugin {
 
     // ------------------------------------------------------------ события
 
+    /// Событие → запись в очереди (без сети). С `auto_send` очередь сразу
+    /// отправляется; ошибка отправки — ошибка события, и воркер outbox
+    /// повторит его позже (запись в очереди та же, без дублей).
     async fn handle(&self, ev: &DomainEvent, ctx: &PluginCtx) -> anyhow::Result<()> {
         match ev {
             DomainEvent::TaskImported { source, task, .. } if source == ID => {
-                self.on_imported(ctx, task).await
+                return self.on_imported(ctx, task).await;
             }
             DomainEvent::ItemCreated {
                 task,
                 parent: Some(parent),
-            } => self.on_item_created(ctx, task, parent).await,
+            } => {
+                self.enqueue_item(ctx, OpKind::ChecklistAdd, task, parent)
+                    .await?
+            }
             DomainEvent::ItemCompleted {
                 task,
                 parent: Some(parent),
-            } => self.on_item_completed(ctx, task, parent).await,
+            } => {
+                self.enqueue_item(ctx, OpKind::ChecklistDone, task, parent)
+                    .await?
+            }
             DomainEvent::SessionClosed {
                 session,
                 item,
                 parent,
             } => {
-                self.on_session_closed(ctx, session, item.as_ref(), parent.as_ref())
-                    .await
+                self.enqueue_worklog(ctx, session, item.as_ref(), parent.as_ref())
+                    .await?
             }
-            _ => Ok(()),
+            _ => {}
         }
+        let (s, conn) = self.conn(ctx).await?;
+        if s.auto_send && conn.is_ok() {
+            let r = self.flush(ctx).await?;
+            if let Some(e) = r.error {
+                anyhow::bail!(e);
+            }
+        }
+        Ok(())
     }
 
     /// Импорт: запомнить связь и строки пунктов (без сети).
@@ -235,9 +268,11 @@ impl JiraPlugin {
         Ok(())
     }
 
-    async fn on_item_created(
+    /// Новый или готовый пункт задачи Jira → операция с чек-листом.
+    async fn enqueue_item(
         &self,
         ctx: &PluginCtx,
+        kind: OpKind,
         item: &Task,
         parent: &Task,
     ) -> anyhow::Result<()> {
@@ -245,79 +280,29 @@ impl JiraPlugin {
         let Some(key) = self.issue_of(ctx, parent, &s).await? else {
             return Ok(());
         };
-        let conn = match conn {
-            Ok(c) => c,
-            Err(why) => {
-                self.log_unconfigured(&why);
-                return Ok(());
-            }
-        };
-        if item_line(ctx, item.id).await?.is_some() {
-            return Ok(()); // уже отправлен (повтор доставки)
+        if let Err(why) = conn {
+            self.log_unconfigured(&why);
+            return Ok(());
         }
-        let jira = Jira::new(&self.inner.http, &conn);
-        let Some(field) = self.note(self.field(&s, &jira, &conn).await)? else {
-            return Ok(());
-        };
-        let issue = self.note(jira.issue(&key, Some(&field)).await)?;
-        // Строка уже есть (её добавили в Jira или прошлая попытка успела
-        // записать) — только запоминаем.
-        if checklist::find_line(&issue.checklist, &item.title).is_none() {
-            let text = checklist::append(&issue.checklist, &item.title);
-            self.note(jira.put_checklist(&key, &field, &text).await)?;
-            tracing::info!(issue = %key, item = %item.title, "пункт добавлен в чек-лист Jira");
+        let id = item.id.to_string();
+        if kind == OpKind::ChecklistAdd && item_line(ctx, &id).await?.is_some() {
+            return Ok(()); // строка уже в чек-листе (импорт или повтор)
         }
-        sqlx::query(
-            "INSERT OR REPLACE INTO jira_items (item_id, issue_key, line_text) VALUES (?, ?, ?)",
-        )
-        .bind(item.id.to_string())
-        .bind(&key)
-        .bind(item.title.trim())
-        .execute(ctx.pool())
-        .await?;
-        Ok(())
-    }
-
-    async fn on_item_completed(
-        &self,
-        ctx: &PluginCtx,
-        item: &Task,
-        parent: &Task,
-    ) -> anyhow::Result<()> {
-        let (s, conn) = self.conn(ctx).await?;
-        let Some(key) = self.issue_of(ctx, parent, &s).await? else {
-            return Ok(());
+        let op = NewOp {
+            kind,
+            ref_id: id,
+            issue_key: key,
+            text: item.title.clone(),
+            worklog: None,
         };
-        let conn = match conn {
-            Ok(c) => c,
-            Err(why) => {
-                self.log_unconfigured(&why);
-                return Ok(());
-            }
-        };
-        let jira = Jira::new(&self.inner.http, &conn);
-        let Some(field) = self.note(self.field(&s, &jira, &conn).await)? else {
-            return Ok(());
-        };
-        let text = item_line(ctx, item.id)
-            .await?
-            .unwrap_or_else(|| item.title.clone());
-        // Перечитать поле перед записью: строки могли поменять в Jira.
-        let issue = self.note(jira.issue(&key, Some(&field)).await)?;
-        let idx = checklist::find_line(&issue.checklist, &text)
-            .or_else(|| checklist::find_line(&issue.checklist, &item.title));
-        let Some(idx) = idx else {
-            tracing::warn!(issue = %key, item = %item.title, "строка пункта не найдена в чек-листе Jira — пропущено");
-            return Ok(());
-        };
-        if let Some(new) = checklist::set_done(&issue.checklist, idx) {
-            self.note(jira.put_checklist(&key, &field, &new).await)?;
-            tracing::info!(issue = %key, item = %item.title, "пункт отмечен в Jira");
+        if queue::push(ctx.pool(), &op).await? {
+            tracing::info!(issue = %op.issue_key, item = %item.title, kind = ?kind, "в очереди Jira");
         }
         Ok(())
     }
 
-    async fn on_session_closed(
+    /// Закрытая сессия → worklog по правилам из настроек.
+    async fn enqueue_worklog(
         &self,
         ctx: &PluginCtx,
         session: &Session,
@@ -350,37 +335,155 @@ impl JiraPlugin {
         let Some(key) = self.issue_of(ctx, &parent, &s).await? else {
             return Ok(());
         };
-        let conn = match conn {
-            Ok(c) => c,
-            Err(why) => {
-                self.log_unconfigured(&why);
-                return Ok(());
-            }
-        };
+        if let Err(why) = conn {
+            self.log_unconfigured(&why);
+            return Ok(());
+        }
         let sid = session.id.to_string();
-        let sent = sqlx::query("SELECT 1 FROM jira_worklogs WHERE session_id = ?")
-            .bind(&sid)
-            .fetch_optional(ctx.pool())
-            .await?;
-        if sent.is_some() {
+        if worklog_sent(ctx, &sid).await? {
             return Ok(());
         }
         let secs = (ended - session.started_at).num_seconds();
-        let jira = Jira::new(&self.inner.http, &conn);
-        let id = self.note(
-            jira.add_worklog(&key, session.started_at, secs, &comment)
-                .await,
-        )?;
-        sqlx::query(
-            "INSERT OR IGNORE INTO jira_worklogs (session_id, issue_key, worklog_id, status) VALUES (?, ?, ?, 'sent')",
-        )
-        .bind(&sid)
-        .bind(&key)
-        .bind(&id)
-        .execute(ctx.pool())
-        .await?;
-        tracing::info!(issue = %key, seconds = secs.max(60), "worklog записан в Jira");
+        let op = NewOp {
+            kind: OpKind::Worklog,
+            ref_id: sid,
+            issue_key: key,
+            text: comment,
+            worklog: Some((session.started_at, secs)),
+        };
+        if queue::push(ctx.pool(), &op).await? {
+            tracing::info!(issue = %op.issue_key, seconds = secs, "worklog в очереди Jira");
+        }
         Ok(())
+    }
+
+    // ------------------------------------------------------------ отправка
+
+    /// Отправить ждущие операции по порядку. Первая ошибка останавливает
+    /// отправку (следующие могут зависеть от неё: пункт добавлен → готов) и
+    /// записывается на операцию. `Err` — только БД или «не настроена».
+    pub(crate) async fn flush(&self, ctx: &PluginCtx) -> anyhow::Result<FlushResult> {
+        let _one = self.inner.flush.lock().await;
+        let ops = queue::pending(ctx.pool()).await?;
+        if ops.is_empty() {
+            return Ok(FlushResult::default());
+        }
+        let (s, conn) = self.conn(ctx).await?;
+        let conn =
+            conn.map_err(|why| CoreError::Validation(format!("Jira не настроена: {why}")))?;
+        let jira = Jira::new(&self.inner.http, &conn);
+        let mut sent = 0;
+        for op in ops {
+            match self.send_op(ctx, &s, &jira, &conn, &op).await {
+                Ok(()) => {
+                    queue::mark_sent(ctx.pool(), op.id).await?;
+                    sent += 1;
+                }
+                Err(e) => {
+                    let msg = format!("{e:#}");
+                    queue::mark_failed(ctx.pool(), op.id, &msg).await?;
+                    tracing::warn!(issue = %op.issue_key, kind = ?op.kind, error = %msg, "не отправлено в Jira");
+                    return Ok(FlushResult {
+                        sent,
+                        error: Some(format!("{}: {msg}", op.issue_key)),
+                    });
+                }
+            }
+        }
+        Ok(FlushResult { sent, error: None })
+    }
+
+    async fn send_op(
+        &self,
+        ctx: &PluginCtx,
+        s: &JiraSettings,
+        jira: &Jira<'_>,
+        conn: &Conn,
+        op: &Op,
+    ) -> anyhow::Result<()> {
+        let key = &op.issue_key;
+        match op.kind {
+            OpKind::ChecklistAdd => {
+                if item_line(ctx, &op.ref_id).await?.is_some() {
+                    return Ok(()); // уже отправлен
+                }
+                let field = self.checklist_field(s, jira, conn).await?;
+                let issue = self.note(jira.issue(key, Some(&field)).await)?;
+                // Строка уже есть (её добавили в Jira или прошлая попытка
+                // успела записать) — только запоминаем.
+                if checklist::find_line(&issue.checklist, &op.text).is_none() {
+                    let text = checklist::append(&issue.checklist, &op.text);
+                    self.note(jira.put_checklist(key, &field, &text).await)?;
+                    tracing::info!(issue = %key, item = %op.text, "пункт добавлен в чек-лист Jira");
+                }
+                sqlx::query(
+                    "INSERT OR REPLACE INTO jira_items (item_id, issue_key, line_text) VALUES (?, ?, ?)",
+                )
+                .bind(&op.ref_id)
+                .bind(key)
+                .bind(op.text.trim())
+                .execute(ctx.pool())
+                .await?;
+            }
+            OpKind::ChecklistDone => {
+                let field = self.checklist_field(s, jira, conn).await?;
+                let text = item_line(ctx, &op.ref_id)
+                    .await?
+                    .unwrap_or_else(|| op.text.clone());
+                // Перечитать поле перед записью: строки могли поменять в Jira.
+                let issue = self.note(jira.issue(key, Some(&field)).await)?;
+                let idx = checklist::find_line(&issue.checklist, &text)
+                    .or_else(|| checklist::find_line(&issue.checklist, &op.text));
+                let Some(idx) = idx else {
+                    tracing::warn!(issue = %key, item = %op.text, "строка пункта не найдена в чек-листе Jira — пропущено");
+                    return Ok(());
+                };
+                if let Some(new) = checklist::set_done(&issue.checklist, idx) {
+                    self.note(jira.put_checklist(key, &field, &new).await)?;
+                    tracing::info!(issue = %key, item = %op.text, "пункт отмечен в Jira");
+                }
+            }
+            OpKind::Worklog => {
+                if worklog_sent(ctx, &op.ref_id).await? {
+                    return Ok(());
+                }
+                let (Some(started), Some(secs)) = (op.started_at, op.seconds) else {
+                    anyhow::bail!("в записи worklog нет времени");
+                };
+                let id = self.note(jira.add_worklog(key, started, secs, &op.text).await)?;
+                sqlx::query(
+                    "INSERT OR IGNORE INTO jira_worklogs (session_id, issue_key, worklog_id, status) VALUES (?, ?, ?, 'sent')",
+                )
+                .bind(&op.ref_id)
+                .bind(key)
+                .bind(&id)
+                .execute(ctx.pool())
+                .await?;
+                tracing::info!(issue = %key, seconds = secs.max(60), "worklog записан в Jira");
+            }
+        }
+        Ok(())
+    }
+
+    /// Поле чек-листа; нет его — ошибка операции (видна в очереди).
+    async fn checklist_field(
+        &self,
+        s: &JiraSettings,
+        jira: &Jira<'_>,
+        conn: &Conn,
+    ) -> anyhow::Result<String> {
+        self.note(self.field(s, jira, conn).await)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "в Jira нет текстового поля чек-листа «Checklists» — укажите его id в настройках"
+            )
+        })
+    }
+
+    /// Очередь для `GET /queue`.
+    pub(crate) async fn queue_json(&self, ctx: &PluginCtx) -> anyhow::Result<Value> {
+        let s = self.load(ctx).await?;
+        let items = queue::pending(ctx.pool()).await?;
+        Ok(json!({"auto_send": s.auto_send, "items": items}))
     }
 
     // ------------------------------------------------------------ импорт
@@ -442,6 +545,8 @@ impl JiraPlugin {
             "checklist_field_resolved": field,
             "worklog": s.worklog,
             "has_token": has_token,
+            "auto_send": s.auto_send,
+            "queue_pending": queue::pending_count(ctx.pool()).await?,
             "last_error": lock(&self.inner.last_error).clone(),
         }))
     }
@@ -648,15 +753,23 @@ async fn link(ctx: &PluginCtx, task: TaskId, key: &str, url: &str) -> anyhow::Re
     Ok(())
 }
 
-async fn item_line(ctx: &PluginCtx, item: TaskId) -> anyhow::Result<Option<String>> {
+async fn item_line(ctx: &PluginCtx, item: &str) -> anyhow::Result<Option<String>> {
     let row = sqlx::query("SELECT line_text FROM jira_items WHERE item_id = ?")
-        .bind(item.to_string())
+        .bind(item)
         .fetch_optional(ctx.pool())
         .await?;
     Ok(match row {
         Some(r) => Some(r.try_get("line_text")?),
         None => None,
     })
+}
+
+async fn worklog_sent(ctx: &PluginCtx, session: &str) -> anyhow::Result<bool> {
+    let row = sqlx::query("SELECT 1 FROM jira_worklogs WHERE session_id = ?")
+        .bind(session)
+        .fetch_optional(ctx.pool())
+        .await?;
+    Ok(row.is_some())
 }
 
 fn find_task(tree: &[TaskDto], id: TaskId) -> Option<&TaskDto> {

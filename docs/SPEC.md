@@ -99,7 +99,8 @@ pub trait TaskSource: Plugin {
 - Smart Checklist хранится в кастомном поле задачи «Checklists» (текст, строка на пункт, маркеры `-` todo, `+` done, `~` in progress, `x` skipped). Писать — только целиком через `PUT /rest/api/2/issue/{key}` с этим полем. ID поля ищется при настройке через `GET /rest/api/2/field` по имени (можно задать вручную). У строк нет ID → сопоставление по тексту; перед каждой записью — перечитать поле и применить изменение к свежему тексту.
 - Авторизация — **только API-токен**. Два режима: Data Center/Server — `Authorization: Bearer <PAT>`; Cloud — Basic `email:token`. Режим и base URL — в настройках. Какой у пользователя — пока не подтверждено, поддержать оба.
 - Тесты — на `wiremock`, без реальной Jira.
-- Таблицы плагина: `jira_links(task_id, issue_key, url)`, `jira_items(item_id, issue_key, line_text)`, `jira_worklogs(session_id, issue_key, worklog_id, status)`.
+- **Очередь отправки.** Новые строки, отметки «готово» и worklog не уходят в Jira сразу, а копятся в очереди плагина: её видно на экране «Настройки», лишнее можно убрать, остальное — отправить кнопкой «Отправить». Настройка «Отправлять автоматически» (`auto_send`, по умолчанию выключена) отправляет очередь сразу. Маршруты: `GET /api/plugins/jira/queue`, `POST …/queue/send`, `DELETE …/queue/{id}`.
+- Таблицы плагина: `jira_links(task_id, issue_key, url)`, `jira_items(item_id, issue_key, line_text)`, `jira_worklogs(session_id, issue_key, worklog_id, status)`, `jira_queue` (очередь отправки).
 
 ## REST API (v1)
 

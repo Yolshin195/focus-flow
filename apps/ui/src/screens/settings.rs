@@ -1,4 +1,5 @@
-//! Экран «Настройки»: подключение к Jira и состояние плагина.
+//! Экран «Настройки»: подключение к Jira, состояние плагина и очередь
+//! отправки (что плагин собирается записать в Jira).
 //!
 //! Данные — через [`JiraSettingsApi`](crate::api::JiraSettingsApi) из
 //! [`ApiHandle`](crate::ApiHandle) и `FocusApi::plugin_status`. Форма
@@ -10,7 +11,7 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use focus_api_types::{ApiError, PluginStatusDto};
 
-use crate::api::{JiraMode, JiraPatch, JiraState, JiraWorklog};
+use crate::api::{JiraMode, JiraOp, JiraOpKind, JiraPatch, JiraQueue, JiraState, JiraWorklog};
 use crate::components::{Icon, TextInput};
 use crate::fmt;
 use crate::state::{error_text, use_api};
@@ -27,6 +28,7 @@ struct Form {
     token: String,
     field: String,
     worklog: JiraWorklog,
+    auto_send: bool,
 }
 
 impl Form {
@@ -38,6 +40,7 @@ impl Form {
             token: String::new(),
             field: s.checklist_field_id.clone().unwrap_or_default(),
             worklog: s.worklog,
+            auto_send: s.auto_send,
         }
     }
 
@@ -57,6 +60,7 @@ impl Form {
             email: self.email.trim().to_owned(),
             checklist_field_id: self.field.trim().to_owned(),
             worklog: self.worklog,
+            auto_send: self.auto_send,
             token: (!token.is_empty()).then(|| token.to_owned()),
         }
     }
@@ -70,7 +74,7 @@ enum Notice {
 }
 
 /// Состояние экрана.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct Page {
     saved: Signal<Option<JiraState>>,
     form: Signal<Form>,
@@ -80,6 +84,9 @@ struct Page {
     load_error: Signal<Option<String>>,
     notice: Signal<Option<Notice>>,
     busy: Signal<bool>,
+    queue: Signal<Option<JiraQueue>>,
+    queue_notice: Signal<Option<Notice>>,
+    queue_busy: Signal<bool>,
 }
 
 /// Перечитать настройки и состояние плагина. `reset_form` — заполнить
@@ -100,11 +107,26 @@ async fn reload(api: &crate::ApiHandle, mut p: Page, reset_form: bool) {
         }
         Err(e) => p.load_error.set(Some(load_error_text(&e))),
     }
+    if let Ok(q) = api.jira().jira_queue().await {
+        set_queue(p, q);
+    }
     if let Ok(list) = api.0.plugin_status().await {
         let jira = list.into_iter().find(|s| s.id == "jira");
         if *p.plugin.peek() != jira {
             p.plugin.set(jira);
         }
+    }
+}
+
+/// Положить очередь, если она изменилась (итог отправки — отдельно, в notice).
+fn set_queue(mut p: Page, q: JiraQueue) {
+    let q = JiraQueue {
+        sent: None,
+        error: None,
+        ..q
+    };
+    if p.queue.peek().as_ref() != Some(&q) {
+        p.queue.set(Some(q));
     }
 }
 
@@ -129,6 +151,9 @@ pub fn Settings() -> Element {
         load_error: use_signal(|| None),
         notice: use_signal(|| None),
         busy: use_signal(|| false),
+        queue: use_signal(|| None),
+        queue_notice: use_signal(|| None),
+        queue_busy: use_signal(|| false),
     };
 
     let api_poll = api.clone();
@@ -343,6 +368,17 @@ pub fn Settings() -> Element {
                             }
                         }
                     }
+                    FormRow {
+                        label: "Отправка",
+                        hint: "Выключено — изменения копятся в очереди ниже и уходят в Jira кнопкой «Отправить»",
+                        div { class: "toggles",
+                            Toggle {
+                                label: "Отправлять автоматически",
+                                on: f.auto_send,
+                                on_toggle: move |v| form.write().auto_send = v,
+                            }
+                        }
+                    }
                     FormRow { label: "Worklog", hint: "Какие сессии списывать на задачу Jira",
                         div { class: "toggles",
                             Toggle {
@@ -394,6 +430,9 @@ pub fn Settings() -> Element {
                     }
                 }
             }
+            if saved.is_some() {
+                QueueCard { page }
+            }
             p { class: "settings-note",
                 "Токен хранится в каталоге данных сервиса (secrets/jira/token, права 0600) и не возвращается в ответах API. "
                 "Без настройки плагин ничего не отправляет."
@@ -427,7 +466,7 @@ fn PluginBadge(state: Option<JiraState>, plugin: Option<PluginStatusDto>) -> Ele
     let Some(s) = state else {
         return rsx! {};
     };
-    let pending = plugin.as_ref().map(|p| p.outbox_pending).unwrap_or(0);
+    let pending = s.queue_pending;
     let delivery_error = plugin
         .as_ref()
         .filter(|p| !p.healthy)
@@ -457,12 +496,188 @@ fn PluginBadge(state: Option<JiraState>, plugin: Option<PluginStatusDto>) -> Ele
                 "{title}"
             }
             if pending > 0 {
-                span { class: "plugin-queue num", title: "События, которые ждут отправки в Jira",
+                span { class: "plugin-queue num", title: "Операции, которые ждут отправки в Jira",
                     "в очереди {pending}"
                 }
             }
             if let Some(d) = detail {
                 span { class: "plugin-detail", title: "{d}", "{d}" }
+            }
+        }
+    }
+}
+
+/// Карточка «Очередь отправки»: что уйдёт в Jira, кнопка «Отправить» и
+/// удаление ненужного.
+#[component]
+fn QueueCard(page: Page) -> Element {
+    let api = use_api();
+    // `Callback` — `Copy`: один обработчик на все строки.
+    let api_drop = api.clone();
+    let drop_op = use_callback(move |id: i64| {
+        let api = api_drop.clone();
+        let mut p = page;
+        spawn(async move {
+            p.queue_busy.set(true);
+            match api.jira().drop_jira_op(id).await {
+                Ok(q) => {
+                    set_queue(p, q);
+                    p.queue_notice.set(None);
+                }
+                Err(e) => p.queue_notice.set(Some(Notice::Err(error_text(&e)))),
+            }
+            reload(&api, p, false).await;
+            p.queue_busy.set(false);
+        });
+    });
+
+    let Some(q) = page.queue.read().clone() else {
+        return rsx! {};
+    };
+    let configured = page.saved.read().as_ref().is_some_and(|s| s.configured);
+    let busy = (page.queue_busy)();
+    let n = q.items.len();
+
+    let api_send = api.clone();
+    let send = move |_| {
+        let api = api_send.clone();
+        let mut p = page;
+        spawn(async move {
+            p.queue_busy.set(true);
+            p.queue_notice.set(None);
+            let notice = match api.jira().send_jira_queue().await {
+                Ok(r) => {
+                    let sent = r.sent.unwrap_or(0);
+                    let n = Notice::from_send(sent, r.error.clone());
+                    set_queue(p, r);
+                    n
+                }
+                Err(e) => Notice::Err(test_error_text(&e)),
+            };
+            p.queue_notice.set(Some(notice));
+            reload(&api, p, false).await;
+            p.queue_busy.set(false);
+        });
+    };
+
+    let hint = if q.auto_send {
+        "Автоотправка включена: изменения уходят в Jira сразу, здесь остаются только те, что не прошли."
+    } else {
+        "В Jira ничего не уходит само: проверь список и нажми «Отправить». Ненужное убери крестиком."
+    };
+
+    rsx! {
+        section { class: "card settings-card queue-card", "aria-labelledby": "queue-title",
+            div { class: "card-head",
+                div { class: "card-head-title",
+                    h2 { id: "queue-title", class: "card-title", "Очередь отправки" }
+                    if n > 0 {
+                        span { class: "queue-count num", "{n}" }
+                    }
+                }
+                button {
+                    class: "btn btn-accent btn-small",
+                    disabled: busy || n == 0 || !configured,
+                    title: if configured { "" } else { "Сначала настрой подключение" },
+                    onclick: send,
+                    "Отправить"
+                }
+            }
+            p { class: "queue-hint", "{hint}" }
+            if n == 0 {
+                p { class: "queue-empty", "Очередь пуста — всё отправлено." }
+            } else {
+                ul { class: "queue-list",
+                    for op in q.items.iter().cloned() {
+                        QueueRow {
+                            key: "{op.id}",
+                            op: op.clone(),
+                            busy,
+                            on_drop: move |id| drop_op.call(id),
+                        }
+                    }
+                }
+            }
+            if busy || page.queue_notice.read().is_some() {
+                div { class: "card-foot",
+                    if busy {
+                        span { class: "notice notice-wait", "Подожди…" }
+                    } else if let Some(n) = page.queue_notice.read().clone() {
+                        match n {
+                            Notice::Ok(text) => rsx! {
+                                span { class: "notice notice-ok", role: "status", {Icon::Check.render(14)} "{text}" }
+                            },
+                            Notice::Err(text) => rsx! {
+                                span { class: "notice notice-err", role: "alert", "{text}" }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Notice {
+    fn from_send(sent: u64, error: Option<String>) -> Self {
+        let what = |n: u64| {
+            format!(
+                "{n} {}",
+                fmt::plural(n as usize, "запись", "записи", "записей")
+            )
+        };
+        match error {
+            None if sent == 0 => Self::Ok("Нечего отправлять.".into()),
+            None => Self::Ok(format!("Отправлено: {}.", what(sent))),
+            Some(e) if sent == 0 => Self::Err(format!("Не отправлено: {e}")),
+            Some(e) => Self::Err(format!("Отправлено {}, дальше ошибка: {e}", what(sent))),
+        }
+    }
+}
+
+/// Одна операция очереди.
+#[component]
+fn QueueRow(op: JiraOp, busy: bool, on_drop: EventHandler<i64>) -> Element {
+    let (icon, label, class) = match op.kind {
+        JiraOpKind::ChecklistAdd => (Icon::Plus, "Новый пункт", "queue-kind add"),
+        JiraOpKind::ChecklistDone => (Icon::Check, "Пункт готов", "queue-kind done"),
+        JiraOpKind::Worklog => (Icon::Play, "Worklog", "queue-kind worklog"),
+        JiraOpKind::Unknown => (Icon::External, "Операция", "queue-kind"),
+    };
+    // Подпись и время (время — моноширинными цифрами).
+    let (meta, at) = match (op.started_at, op.seconds) {
+        (Some(at), Some(sec)) => (
+            format!("{} · начало", fmt::duration(sec.max(60))),
+            fmt::local_hm(at),
+        ),
+        _ => ("в очереди с".to_owned(), fmt::local_hm(op.created_at)),
+    };
+    let id = op.id;
+    rsx! {
+        li { class: if op.last_error.is_some() { "queue-row failed" } else { "queue-row" },
+            span { class, {icon.render(14)} "{label}" }
+            div { class: "queue-main",
+                div { class: "queue-text", title: "{op.text}", "{op.text}" }
+                div { class: "queue-meta",
+                    span { class: "chip chip-jira", "{op.issue_key}" }
+                    span { "{meta} " span { class: "num", "{at}" } }
+                }
+                if let Some(err) = op.last_error.clone() {
+                    div { class: "queue-err", title: "{err}",
+                        if op.attempts > 1 {
+                            "Попыток: {op.attempts} · "
+                        }
+                        "{err}"
+                    }
+                }
+            }
+            button {
+                class: "icon-btn",
+                disabled: busy,
+                title: "Не отправлять",
+                "aria-label": "Убрать из очереди: {label} «{op.text}»",
+                onclick: move |_| on_drop.call(id),
+                {Icon::Close.render(14)}
             }
         }
     }

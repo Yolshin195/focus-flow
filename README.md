@@ -1,117 +1,182 @@
-# focus-flow
+# Focus Flow
 
-Трекер фокуса 50/10: работа 50 минут над одним пунктом, затем отдых 10 минут, без паузы. Показывает, набрана ли норма дня. Сервис локальный (`focus-flow serve`, Axum + SQLite на `127.0.0.1:7878`), клиенты — desktop UI на Dioxus и Claude через MCP.
+Трекер фокуса 50/10. Работаешь 50 минут над одним пунктом, потом 10 минут отдыхаешь. Паузы нет. Трекер показывает, набрана ли норма дня (по умолчанию 8 часов). Всё работает локально: сервис на Axum + SQLite (`127.0.0.1:7878`), desktop-клиент на Dioxus. Ещё к сервису подключаются Claude через MCP и плагин Jira (импорт задач, чек-лист, worklog).
 
-Спецификация — [`docs/SPEC.md`](docs/SPEC.md), план — [`docs/PLAN-backend.md`](docs/PLAN-backend.md), решения — [`docs/DECISIONS.md`](docs/DECISIONS.md).
+Спецификация — [`docs/SPEC.md`](docs/SPEC.md), решения — [`docs/DECISIONS.md`](docs/DECISIONS.md), ограничения — [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
-## Запуск сервиса
+| Фокус: идёт работа | Задачи |
+|---|---|
+| ![Фокус](docs/screenshots/real-focus-work.png) | ![Задачи](docs/screenshots/real-tasks.png) |
+| **День** | **Настройки Jira** |
+| ![День](docs/screenshots/real-day.png) | ![Настройки](docs/screenshots/real-settings.png) |
+
+Остальные состояния (простой, выбор пункта, отдых, планирование, «Готово», «Прервать») сняты на моке и лежат в [`docs/screenshots`](docs/screenshots).
+
+## Установка
+
+Нужны:
+
+- Rust stable (`rustup`; версия задана в `rust-toolchain.toml`).
+- Linux: WebKitGTK и сопутствующие пакеты для окна, например на Debian/Ubuntu: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev`. На macOS ничего ставить не нужно.
+- По желанию — Dioxus CLI `dx` 0.7 (`cargo install dioxus-cli`), нужен для hot reload и для сборки переносимого пакета.
+
+## Запуск одной командой
 
 ```sh
-cargo run -p focus-flow -- serve      # REST + SSE + MCP на 127.0.0.1:7878
-cargo run -p focus-flow -- token      # показать токен доступа
+cargo run -p focus-flow -- ui
 ```
 
-Данные (`focus.db`, `token`, `secrets/`) лежат в системном каталоге данных: на Linux это `~/.local/share/focus-flow`, на macOS — `~/Library/Application Support/dev.FocusFlow.focus-flow`. Другой каталог задаётся через `--data-dir` или `FOCUS_DATA_DIR`.
+Команда открывает окно. Если сервис на `127.0.0.1:7878` не отвечает, она поднимает его в этом же процессе, а когда окно закроют, штатно его остановит. Если сервис уже запущен (например, через launchd), окно подключится к нему.
 
-## Подключение к Claude
-
-MCP работает на `http://127.0.0.1:7878/mcp` (Streamable HTTP). Доступ защищён тем же токеном, что и REST: заголовок `Authorization: Bearer <токен>`. Сначала запустите `focus-flow serve`.
-
-### Claude Code
+Другие команды:
 
 ```sh
-claude mcp add --transport http focus-flow http://127.0.0.1:7878/mcp --header "Authorization: Bearer $(focus-flow token)"
+cargo run -p focus-flow -- serve    # только сервис: REST + SSE + MCP
+cargo run -p focus-flow -- token    # показать токен доступа
+cargo install --path bin/focus-flow # поставить `focus-flow` в ~/.cargo/bin
 ```
 
-Команда `focus-flow` должна быть в `PATH`, например после `cargo install --path bin/focus-flow`. Можно и без установки: `$(cargo run -q -p focus-flow -- token)`. Проверить подключение — `claude mcp list` или `/mcp` внутри сессии. Если токен поменялся (удалили файл `token`), удалите сервер командой `claude mcp remove focus-flow` и добавьте его заново.
+У `serve`, `ui` и `token` есть флаги `--addr` и `--data-dir` (переменные окружения — `FOCUS_ADDR` и `FOCUS_DATA_DIR`). Сервис без окна и без WebKit (например, для VDS) собирается так: `cargo build -p focus-flow --no-default-features --features notify,mcp,jira`.
 
-### Claude Desktop
+Бинарник из `cargo build` берёт CSS и шрифты из исходников (`apps/ui/assets`). Переносимый пакет с ассетами внутри собирается командой `cd apps/desktop && dx bundle`.
 
-Claude Desktop подключает локальные серверы через stdio. HTTP-сервер с заголовком подключается через мост [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (нужен Node.js). Добавьте в `claude_desktop_config.json` (Settings → Developer → Edit Config):
+## Данные и токен
+
+Данные лежат в системном каталоге:
+
+| ОС | Каталог |
+|---|---|
+| Linux | `~/.local/share/focus-flow` |
+| macOS | `~/Library/Application Support/dev.FocusFlow.focus-flow` |
+
+Внутри: `focus.db` (SQLite), `token` и `secrets/` (токен Jira). Права у файлов с токенами — `0600`. Токен доступа создаётся при первом запуске. REST, SSE и MCP требуют заголовок `Authorization: Bearer <токен>`, свободен только `GET /api/health`. Сервис слушает только loopback и проверяет `Host` и `Origin`. Если удалить файл `token`, при следующем запуске создастся новый токен.
+
+## Подключение Claude (MCP)
+
+MCP доступен на `http://127.0.0.1:7878/mcp` (Streamable HTTP), сервис должен быть запущен.
+
+**Claude Code:**
+
+```sh
+claude mcp add --transport http focus-flow http://127.0.0.1:7878/mcp \
+  --header "Authorization: Bearer $(focus-flow token)"
+```
+
+**Claude Desktop** подключает HTTP-серверы с заголовком через мост [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (нужен Node.js). Добавь в `claude_desktop_config.json` (Settings → Developer → Edit Config):
 
 ```json
 {
   "mcpServers": {
     "focus-flow": {
       "command": "npx",
-      "args": [
-        "-y", "mcp-remote", "http://127.0.0.1:7878/mcp",
-        "--header", "Authorization:${FOCUS_AUTH}"
-      ],
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:7878/mcp", "--header", "Authorization:${FOCUS_AUTH}"],
       "env": { "FOCUS_AUTH": "Bearer <вывод focus-flow token>" }
     }
   }
 }
 ```
 
-Пробела внутри аргумента `--header` нет специально: часть клиентов неправильно передаёт аргументы с пробелами, поэтому `Bearer …` лежит в переменной окружения. После правки перезапустите Claude Desktop.
-
-### Инструменты
+Инструменты:
 
 | Инструмент | Что делает |
 |---|---|
-| `get_status` | текущая сессия, `ends_at`, `remaining_sec`, отработано и норма; `events` — что случилось с прошлого вызова (сессия закончилась, ошибки плагинов) |
+| `get_status` | текущая сессия, `ends_at`, `remaining_sec`, отработано и норма; `events` — что случилось с прошлого вызова |
 | `open_day` · `close_day` | открыть или закрыть сегодняшний день |
-| `list_tasks` | дерево задач (по умолчанию только открытые) |
-| `add_task` | задача, или пункт, если передан `parent_id`; поле `notes` необязательно |
-| `update_task` | правка названия, заметок, статуса, `planned_for` |
-| `start_work(item_id)` | начать 50 минут работы над пунктом |
-| `finish_item(next)` | «Готово»: пункт выполнен, дальше `rest` или `planning` |
-| `interrupt` | «Прервать» работу (отвлёкся) |
+| `list_tasks` · `add_task` · `update_task` | дерево задач; задача или пункт (`parent_id`); правка |
+| `start_work(item_id)` · `finish_item(next)` · `interrupt` | работа, «Готово» (дальше `rest` или `planning`), «Прервать» |
 | `start_planning` · `stop` · `start_rest` | планирование, его остановка, отдых |
-| `get_day_report(date?)` | итоги дня: работа, планирование, отдых, потерянное время |
-
-Кроме инструментов ядра, включённые плагины добавляют свои: плагин Jira — `jira_import(url)` и `jira_status()`. Каждый результат состоит из строки-сводки на русском и компактного JSON. Ошибки (например, `item_required`) возвращаются как ошибка инструмента и содержат подсказку, что делать дальше.
+| `get_day_report(date?)` | итоги дня |
+| `jira_import(url)` · `jira_status()` | от плагина Jira |
 
 ## Настройка Jira
 
-Плагин Jira собран в `focus-flow` по умолчанию и включён, но пока он не настроен, ничего не делает: события пропускаются без сети, а в `GET /api/plugins/status` у плагина `jira` написано «не настроен: …». Экран настроек в UI появится позже; сейчас плагин настраивается через REST (или спросите у Claude `jira_status`).
+В приложении: **Настройки** (внизу боковой панели) → адрес Jira, режим, токен → «Сохранить» → «Проверить подключение». Если всё верно, появится имя пользователя Jira.
 
-Что делает настроенный плагин:
+- **Data Center / Server** — персональный токен (PAT): аватар → Profile → Personal Access Tokens. Запросы идут с `Authorization: Bearer`.
+- **Cloud** — API-токен (<https://id.atlassian.com/manage-profile/security/api-tokens>) и email учётной записи. Запросы идут с Basic `email:токен`.
+- **Поле чек-листа** — id поля Smart Checklist. Если оставить пустым, плагин найдёт поле сам по имени.
+- **Worklog** — какие сессии списывать: работу, прерванную работу (обе по умолчанию включены), планирование (по умолчанию выключено).
 
-- `POST /api/import` (или `jira_import`) со ссылкой `https://<ваша jira>/browse/KEY-123` или ключом `KEY-123` создаёт задачу «KEY-123 · название» и пункты из строк Smart Checklist (`-` — запланирован, `+` — готов, `~` — в работе, `x` — отменён; заголовки `#` пропускаются). Повторный импорт догружает только новые строки.
-- Новый пункт в такой задаче → строка `- текст` в чек-листе; пункт готов → строка становится `+ текст`. Перед каждой записью поле перечитывается, поэтому правки, сделанные в Jira, не теряются.
-- Закрытая сессия работы → worklog на задачу Jira: начало, длительность (не меньше минуты), комментарий — текст пункта. По умолчанию списывается любая работа, включая прерванную; планирование — нет.
+Что делает плагин:
 
-### Токен
+- Ссылка `https://<jira>/browse/KEY-1` или ключ `KEY-1` в поле импорта на экране «Задачи» создаёт задачу, а строки Smart Checklist становятся её пунктами. Повторный импорт догружает новые строки.
+- Новый пункт добавляется в чек-лист строкой `- текст`, готовый пункт становится строкой `+ текст`. Перед каждой записью поле перечитывается.
+- Закрытая сессия работы отправляется в worklog задачи (начало, длительность, текст пункта).
 
-- **Jira Data Center / Server** — персональный токен доступа (PAT): аватар → **Profile** → **Personal Access Tokens** → **Create token**. Режим `data_center`, запросы идут с `Authorization: Bearer <PAT>`.
-- **Jira Cloud** — API-токен: <https://id.atlassian.com/manage-profile/security/api-tokens> → **Create API token**. Режим `cloud`, нужен ещё `email` учётной записи; запросы идут с Basic `email:токен`.
+Если доставка не прошла, событие ждёт в очереди и повторяется. Ошибка и размер очереди видны в «Настройках». Без UI плагин настраивается через REST: `GET`/`PUT /api/plugins/jira/settings`, `POST /api/plugins/jira/test`. Поля описаны в [`docs/DECISIONS.md`](docs/DECISIONS.md), раздел «шаг 7».
 
-Токен хранится в `secrets/jira/token` в каталоге данных (права `0600`). Он не попадает в настройки, ответы API и логи.
+## Горячие клавиши
 
-### Настройки
+| Где | Клавиша | Действие |
+|---|---|---|
+| Фокус | Пробел / Enter | главное действие: выбрать пункт → начать → «Готово» → начать работу после планирования |
+| Фокус | Esc | закрыть диалог или выбор пункта |
+| Выбор пункта | ↑ ↓ · Enter | перейти по списку · выбрать |
+| Задачи | Enter | создать задачу или пункт, импортировать ссылку |
+| Задачи | Esc | отменить ввод пункта |
+| Настройки | Enter | сохранить |
+
+## Автозапуск на macOS
+
+Сервис может стартовать при входе в систему через launchd. После этого `focus-flow ui` подключается к нему.
 
 ```sh
-TOKEN=$(focus-flow token)
-
-# Data Center
-curl -s -X PUT http://127.0.0.1:7878/api/plugins/jira/settings \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"base_url": "https://jira.example.com", "mode": "data_center", "token": "<PAT>"}'
-
-# Cloud
-curl -s -X PUT http://127.0.0.1:7878/api/plugins/jira/settings \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"base_url": "https://example.atlassian.net", "mode": "cloud", "email": "me@example.com", "token": "<API-токен>"}'
-
-# Проверить подключение: в ответе — имя пользователя Jira или ошибка
-curl -s -X POST http://127.0.0.1:7878/api/plugins/jira/test -H "Authorization: Bearer $TOKEN"
-
-# Посмотреть настройки (вместо токена — has_token)
-curl -s http://127.0.0.1:7878/api/plugins/jira/settings -H "Authorization: Bearer $TOKEN"
+cargo install --path bin/focus-flow
+sed "s|__HOME__|$HOME|g" scripts/macos/dev.focusflow.serve.plist > ~/Library/LaunchAgents/dev.focusflow.serve.plist
+launchctl load -w ~/Library/LaunchAgents/dev.focusflow.serve.plist
+curl -s http://127.0.0.1:7878/api/health   # {"status":"ok",...}
 ```
 
-`PUT` меняет только переданные поля; `null` очищает поле, `"token": ""` удаляет токен.
+Остановить и убрать: `launchctl unload -w ~/Library/LaunchAgents/dev.focusflow.serve.plist`. Лог — `~/Library/Logs/focus-flow.log`.
 
-| Поле | Значение |
-|---|---|
-| `base_url` | адрес Jira, например `https://jira.example.com` |
-| `mode` | `data_center` (по умолчанию) или `cloud` |
-| `email` | email учётной записи — только для `cloud` |
-| `token` | PAT или API-токен; только запись |
-| `checklist_field_id` | id поля Smart Checklist, например `customfield_10100`. Если не задан, плагин сам ищет его через `GET /rest/api/2/field` по имени «Smart Checklist» (или содержащему «Checklist») |
-| `worklog` | что списывать: `{"work": true, "interrupted": true, "planning": false}` |
-| `enabled` | `false` выключает плагин целиком |
+## Режим мока (без сервиса)
 
-Если запись в Jira не прошла (нет сети, 5xx, неверный токен), событие остаётся в очереди и повторяется с нарастающей задержкой; текст ошибки виден в `GET /api/plugins/status`.
+Клиент может работать на `MockApi`: данные в памяти, живой таймер. Это удобно для демо и скриншотов.
+
+```sh
+FOCUS_MOCK=1 cargo run -p desktop
+FOCUS_MOCK_SCENARIO=work FOCUS_MOCK_SPEED=60 cargo run -p desktop
+```
+
+- `FOCUS_MOCK=1` — включить мок.
+- `FOCUS_MOCK_SCENARIO` — сценарий, тоже включает мок: `idle`, `work`, `rest`, `planning`, `empty`, `picker`, `interrupt`, `done-choice`, `tasks`, `day`, `settings`.
+- `FOCUS_MOCK_SPEED` — во сколько раз часы мока быстрее реальных (`0` — часы стоят).
+- `FOCUS_MOCK_JIRA=off` — Jira в моке не настроена.
+- `FOCUS_WINDOW_SIZE=960x640` — размер окна.
+
+Без мока клиент берёт адрес из `FOCUS_ADDR`, а токен — из `FOCUS_TOKEN` или из файла `token` в каталоге данных.
+
+## Разработка
+
+```sh
+cd apps/desktop && dx serve          # окно с hot reload (сервис — отдельно: focus-flow serve)
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cd apps/desktop && dx build          # проверка сборки клиента
+cargo check -p focus-api-types -p web --target wasm32-unknown-unknown
+```
+
+Сценарии контракта (`crates/api-contract-tests`) прогоняются на моке, на сервисе и, по желанию, на `HttpApi` против запущенного сервиса: `FOCUS_TEST_ADDR=127.0.0.1:7878 FOCUS_TEST_TOKEN=$(focus-flow token) cargo test -p ui -- --ignored`.
+
+## Структура
+
+```
+crates/
+  api-types           контракт: DTO, ApiError, трейт FocusApi, события SSE (собирается в wasm)
+  api-contract-tests  сценарии поведения против &dyn FocusApi
+  core                домен и правила таймера (без SQL и HTTP)
+  storage             SQLite (sqlx), миграции, репозитории, outbox
+  plugin-api          трейты Plugin и TaskSource, DomainEvent
+  plugin-jira         плагин Jira
+  api-rest            REST + SSE (Axum)
+  api-mcp             MCP (rmcp)
+  server              сборка сервиса: конфиг, токен, таймер, плагины
+apps/
+  ui                  общий интерфейс: экраны, компоненты, MockApi, HttpApi
+  desktop             окно (библиотека + main для dx)
+  web, mobile         заготовки
+bin/focus-flow        CLI: serve | ui | token
+scripts/macos         шаблон launchd
+docs/                 спецификация, план, решения, ограничения, скриншоты
+```

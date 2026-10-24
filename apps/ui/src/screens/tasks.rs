@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use focus_api_types::{ActiveSession, ApiError, NewTask, TaskDto, TaskId, TaskStatus};
 
 use crate::api::jira_key;
-use crate::components::Icon;
+use crate::components::{Icon, TextInput};
 use crate::fmt;
 use crate::state::{run, use_api, use_app, Command};
 use crate::Route;
@@ -22,6 +22,9 @@ pub fn Tasks() -> Element {
     let app = use_app();
     let mut title = use_signal(String::new);
     let mut link = use_signal(String::new);
+    // Пересоздать поле (очистить) после «Создать» / «Импорт».
+    let mut title_reset = use_signal(|| 0u32);
+    let mut link_reset = use_signal(|| 0u32);
     let collapsed = use_signal(HashSet::<TaskId>::new);
 
     let tree = app.tasks.read().clone();
@@ -61,6 +64,7 @@ pub fn Tasks() -> Element {
             Command::Create(NewTask::new(t)),
             move || {
                 title.set(String::new());
+                title_reset += 1;
             },
         );
     };
@@ -75,6 +79,7 @@ pub fn Tasks() -> Element {
         }
         run(api_import.clone(), app, Command::Import(url), move || {
             link.set(String::new());
+            link_reset += 1;
         });
     };
     let import_enter = import.clone();
@@ -124,13 +129,13 @@ pub fn Tasks() -> Element {
             div { class: "composer",
                 label { class: "field field-new",
                     {Icon::Plus.render(18)}
-                    input {
-                        r#type: "text",
+                    TextInput {
+                        reset: title_reset(),
+                        refocus: true,
                         placeholder: "Новая задача…",
-                        value: "{title}",
-                        "aria-label": "Новая задача",
-                        oninput: move |e| title.set(e.value()),
-                        onkeydown: move |e: KeyboardEvent| {
+                        label: "Новая задача",
+                        on_input: move |v| title.set(v),
+                        on_keydown: move |e: KeyboardEvent| {
                             if e.key() == Key::Enter {
                                 create_enter();
                             }
@@ -141,13 +146,13 @@ pub fn Tasks() -> Element {
                     }
                 }
                 div { class: "field field-import",
-                    input {
-                        r#type: "text",
+                    TextInput {
+                        reset: link_reset(),
                         placeholder: if jira_ready { "Вставь ссылку на задачу Jira" } else { "Импорт из Jira" },
-                        value: "{link}",
-                        "aria-label": "Ссылка на задачу Jira",
-                        oninput: move |e| link.set(e.value()),
-                        onkeydown: move |e: KeyboardEvent| {
+                        label: "Ссылка на задачу Jira",
+                        spellcheck: false,
+                        on_input: move |v| link.set(v),
+                        on_keydown: move |e: KeyboardEvent| {
                             if e.key() == Key::Enter && jira_ready {
                                 import_enter();
                             }
@@ -205,6 +210,7 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
     let mut collapsed = collapsed;
     let mut adding = use_signal(|| false);
     let mut draft = use_signal(String::new);
+    let mut draft_reset = use_signal(|| 0u32);
     let id = task.id;
     let is_collapsed = collapsed.read().contains(&id);
     let key = task.external_url.as_deref().and_then(jira_key);
@@ -225,6 +231,7 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
             Command::Create(NewTask::child(id, t)),
             move || {
                 draft.set(String::new());
+                draft_reset += 1;
             },
         );
     };
@@ -279,14 +286,15 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
                     }
                     if adding() {
                         div { class: "item-add",
-                            input {
-                                r#type: "text",
+                            TextInput {
+                                reset: draft_reset(),
+                                refocus: true,
                                 class: "inline-input",
                                 placeholder: "Новый пункт — Enter, чтобы добавить",
-                                value: "{draft}",
+                                label: "Новый пункт",
                                 autofocus: true,
-                                oninput: move |e| draft.set(e.value()),
-                                onkeydown: move |e: KeyboardEvent| match e.key() {
+                                on_input: move |v| draft.set(v),
+                                on_keydown: move |e: KeyboardEvent| match e.key() {
                                     Key::Enter => add(),
                                     Key::Escape => {
                                         draft.set(String::new());
@@ -294,7 +302,7 @@ fn TaskNode(task: TaskDto, collapsed: Signal<HashSet<TaskId>>) -> Element {
                                     }
                                     _ => {}
                                 },
-                                onblur: move |_| {
+                                on_blur: move |_| {
                                     if draft.peek().trim().is_empty() {
                                         adding.set(false);
                                     }

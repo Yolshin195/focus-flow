@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use focus_api_types::{ApiError, PluginStatusDto};
 
 use crate::api::{JiraMode, JiraPatch, JiraState, JiraWorklog};
-use crate::components::Icon;
+use crate::components::{Icon, TextInput};
 use crate::fmt;
 use crate::state::{error_text, use_api};
 
@@ -43,8 +43,15 @@ impl Form {
 
     fn patch(&self) -> JiraPatch {
         let token = self.token.trim();
+        // Адрес без схемы — почти всегда https: подставим её сами.
+        let base = self.base_url.trim();
+        let base_url = if base.is_empty() || base.contains("://") {
+            base.to_owned()
+        } else {
+            format!("https://{base}")
+        };
         JiraPatch {
-            base_url: self.base_url.trim().to_owned(),
+            base_url,
             mode: self.mode,
             // Email нужен только Cloud; в Data Center поле скрыто и не трогается.
             email: self.email.trim().to_owned(),
@@ -67,6 +74,8 @@ enum Notice {
 struct Page {
     saved: Signal<Option<JiraState>>,
     form: Signal<Form>,
+    /// Растёт, когда форму заполнили заново, — поля пересоздаются.
+    form_rev: Signal<u32>,
     plugin: Signal<Option<PluginStatusDto>>,
     load_error: Signal<Option<String>>,
     notice: Signal<Option<Notice>>,
@@ -80,6 +89,7 @@ async fn reload(api: &crate::ApiHandle, mut p: Page, reset_form: bool) {
         Ok(s) => {
             if reset_form || p.saved.peek().is_none() {
                 p.form.set(Form::from_state(&s));
+                p.form_rev += 1;
             }
             if p.saved.peek().as_ref() != Some(&s) {
                 p.saved.set(Some(s));
@@ -114,6 +124,7 @@ pub fn Settings() -> Element {
     let page = Page {
         saved: use_signal(|| None),
         form: use_signal(Form::default),
+        form_rev: use_signal(|| 0),
         plugin: use_signal(|| None),
         load_error: use_signal(|| None),
         notice: use_signal(|| None),
@@ -138,6 +149,7 @@ pub fn Settings() -> Element {
     let f = form.read().clone();
     let dirty = is_dirty(saved.as_ref(), &f);
     let busy = (page.busy)();
+    let rev = (page.form_rev)();
     let cloud = f.mode == JiraMode::Cloud;
     let token_hint: &'static str = if cloud {
         "API-токен: id.atlassian.com → Security → API tokens"
@@ -149,7 +161,8 @@ pub fn Settings() -> Element {
         "сохранён — введи новый, чтобы заменить"
     } else {
         "вставь токен"
-    };
+    }
+    .to_owned();
 
     let api_save = api.clone();
     let save = move |then_test: bool| {
@@ -243,14 +256,15 @@ pub fn Settings() -> Element {
                 div { class: "form",
                     FormRow { label: "Адрес Jira", hint: "Например, https://jira.example.com или https://example.atlassian.net",
                         label { class: "field",
-                            input {
-                                r#type: "url",
+                            TextInput {
+                                reset: rev,
+                                initial: f.base_url.clone(),
+                                kind: "url",
                                 placeholder: "https://jira.example.com",
-                                value: "{f.base_url}",
-                                "aria-label": "Адрес Jira",
-                                spellcheck: "false",
-                                oninput: move |e| form.write().base_url = e.value(),
-                                onkeydown: move |e| on_enter.call(e),
+                                label: "Адрес Jira",
+                                spellcheck: false,
+                                on_input: move |v| form.write().base_url = v,
+                                on_keydown: move |e| on_enter.call(e),
                             }
                         }
                     }
@@ -270,14 +284,15 @@ pub fn Settings() -> Element {
                     if cloud {
                         FormRow { label: "Email", hint: "Email учётной записи Atlassian",
                             label { class: "field",
-                                input {
-                                    r#type: "email",
+                                TextInput {
+                                    reset: rev,
+                                    initial: f.email.clone(),
+                                    kind: "email",
                                     placeholder: "me@example.com",
-                                    value: "{f.email}",
-                                    "aria-label": "Email",
-                                    spellcheck: "false",
-                                    oninput: move |e| form.write().email = e.value(),
-                                    onkeydown: move |e| on_enter.call(e),
+                                    label: "Email",
+                                    spellcheck: false,
+                                    on_input: move |v| form.write().email = v,
+                                    on_keydown: move |e| on_enter.call(e),
                                 }
                             }
                         }
@@ -287,14 +302,14 @@ pub fn Settings() -> Element {
                         hint: token_hint,
                         div { class: "field-line",
                             label { class: "field field-grow",
-                                input {
-                                    r#type: "password",
+                                TextInput {
+                                    reset: rev,
+                                    kind: "password",
                                     placeholder: token_placeholder,
-                                    value: "{f.token}",
-                                    "aria-label": "Токен",
-                                    autocomplete: "off",
-                                    oninput: move |e| form.write().token = e.value(),
-                                    onkeydown: move |e| on_enter.call(e),
+                                    label: "Токен",
+                                    spellcheck: false,
+                                    on_input: move |v| form.write().token = v,
+                                    on_keydown: move |e| on_enter.call(e),
                                 }
                                 if has_token && f.token.is_empty() {
                                     span { class: "saved-mark", {Icon::Check.render(14)} "сохранён" }
@@ -314,14 +329,14 @@ pub fn Settings() -> Element {
                         label: "Поле чек-листа",
                         hint: "Необязательно: id поля Smart Checklist. Пусто — плагин найдёт его сам по имени.",
                         label { class: "field",
-                            input {
-                                r#type: "text",
+                            TextInput {
+                                reset: rev,
+                                initial: f.field.clone(),
                                 placeholder: "автоматически",
-                                value: "{f.field}",
-                                "aria-label": "ID поля чек-листа",
-                                spellcheck: "false",
-                                oninput: move |e| form.write().field = e.value(),
-                                onkeydown: move |e| on_enter.call(e),
+                                label: "ID поля чек-листа",
+                                spellcheck: false,
+                                on_input: move |v| form.write().field = v,
+                                on_keydown: move |e| on_enter.call(e),
                             }
                             if let Some(id) = saved.as_ref().and_then(|s| s.checklist_field_resolved.clone()).filter(|_| f.field.trim().is_empty()) {
                                 span { class: "resolved num", title: "Найдено автоматически", "{id}" }

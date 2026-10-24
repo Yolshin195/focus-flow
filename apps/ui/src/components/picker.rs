@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use focus_api_types::{TaskDto, TaskId, TaskStatus};
 
-use super::Icon;
+use super::{Icon, TextInput};
 use crate::api::jira_key;
 
 /// Группа пунктов под задачей.
@@ -104,13 +104,12 @@ pub fn ItemPicker(
         div { class: "picker", onkeydown,
             label { class: "picker-search",
                 {Icon::Search.render(16)}
-                input {
-                    r#type: "text",
+                TextInput {
                     placeholder: "Найти пункт",
-                    value: "{query}",
+                    label: "Найти пункт",
                     autofocus: true,
-                    oninput: move |e| query.set(e.value()),
-                    onkeydown: move |e: KeyboardEvent| {
+                    on_input: move |v| query.set(v),
+                    on_keydown: move |e: KeyboardEvent| {
                         // Пробел в поиске — это текст, а не «главное действие».
                         if e.key() == Key::Character(" ".into()) {
                             e.stop_propagation();

@@ -111,6 +111,11 @@ impl JiraSettings {
 /// Проверка `base_url`: `http(s)://хост[/путь]`.
 pub fn validate_base_url(s: &str) -> Result<String, String> {
     let s = s.trim().trim_end_matches('/');
+    if !s.contains("://") {
+        return Err(format!(
+            "base_url «{s}»: нужен адрес со схемой, например https://{s}"
+        ));
+    }
     let u = reqwest::Url::parse(s).map_err(|e| format!("base_url «{s}»: {e}"))?;
     if !matches!(u.scheme(), "http" | "https") || u.host_str().is_none() {
         return Err(format!("base_url «{s}»: нужен http(s)://хост"));

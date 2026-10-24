@@ -147,8 +147,9 @@ fn read_token() -> Option<String> {
 /// Применять правки DOM сразу, а не в `requestAnimationFrame`. Dioxus ждёт
 /// от страницы подтверждения каждой пачки правок и до него не крутит задачи,
 /// а у скрытого или свёрнутого окна rAF не вызывается — вставало бы всё:
-/// SSE, ход таймера, трей. Так Dioxus сам работает с окнами, созданными
-/// невидимыми (`headless`).
+/// SSE, ход таймера, трей. Так Dioxus работает с окнами, созданными
+/// невидимыми (`headless`): на macOS и Windows — всегда (окно показывается
+/// после первой отрисовки), на Linux — нет, там это и включаем.
 fn apply_edits_when_hidden() {
     let script = "window.interpreter.headless = true;";
     if let Err(e) = dioxus::desktop::window().webview.evaluate_script(script) {

@@ -24,11 +24,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall -y dioxus-cli --version 0.7.10
-      - run: dx bundle --platform web --release
+      # Профиль wasm-release (корневой Cargo.toml) dx берёт сам. Без
+      # --debug-symbols=false dx 0.7 оставляет в wasm отладочный DWARF (~1.4 МБ).
+      - run: dx bundle --platform web --release --debug-symbols=false
         working-directory: apps/web
       - run: |
           OUT=target/dx/web/release/web/public
+          # 404.html = index.html: прямой заход на /focus-flow/tasks и т.п.
           cp $OUT/index.html $OUT/404.html
+          # Картинка для превью ссылки (og:image в index.html).
+          cp docs/screenshots/focus-work.png $OUT/og.png
           touch $OUT/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -15,6 +15,11 @@ pub trait Platform {
     fn keep_awake(&self, on: bool);
     /// Базовый адрес сервиса, например `http://127.0.0.1:7878`.
     fn api_base_url(&self) -> String;
+    /// Стили и `@font-face` уже подключила страница (`index.html` веб-версии),
+    /// поэтому [`App`](crate::App) их не вставляет — иначе они грузились бы дважды.
+    fn styles_in_page(&self) -> bool {
+        false
+    }
 }
 
 /// Платформа, которая ничего не умеет, — для тестов и заготовок.

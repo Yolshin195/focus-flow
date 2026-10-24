@@ -31,13 +31,14 @@ pub fn Layout() -> Element {
             nav.push(Route::Focus {});
         }
     });
-    let (worked, target) = app
+    let norm = app
         .status
         .read()
         .as_ref()
-        .map(|s| (s.worked_today_sec, s.target_sec))
-        .unwrap_or((0, 8 * 3600));
-    let pct = (worked as f64 / target.max(1) as f64 * 100.0).min(100.0);
+        .map(|s| (s.worked_today_sec, s.target_sec));
+    let pct = norm
+        .map(|(worked, target)| (worked as f64 / target.max(1) as f64 * 100.0).min(100.0))
+        .unwrap_or(0.0);
     let conn = app.conn.read().clone();
     // Пока нет связи, тост «Нет связи…» не нужен — об этом говорит плашка.
     let error = app
@@ -64,8 +65,14 @@ pub fn Layout() -> Element {
                     NavItem { to: Route::Settings {}, icon: Icon::Settings, label: "Настройки" }
                 }
                 div { class: "side-progress", title: "Норма дня",
-                    div { class: "side-progress-value num", "{fmt::hm(worked)}" }
-                    div { class: "side-progress-of", "из " span { class: "num", "{fmt::hm(target)}" } }
+                    if let Some((worked, target)) = norm {
+                        div { class: "side-progress-value num", "{fmt::hm(worked)}" }
+                        div { class: "side-progress-of", "из " span { class: "num", "{fmt::hm(target)}" } }
+                    } else {
+                        // До данных — пустые строки той же высоты, без выдуманных 0:00.
+                        div { class: "side-progress-value num", {fmt::NBSP} }
+                        div { class: "side-progress-of", {fmt::NBSP} }
+                    }
                     div { class: "side-progress-bar",
                         div { class: "side-progress-fill", style: "width: {pct:.2}%" }
                     }

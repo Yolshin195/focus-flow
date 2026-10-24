@@ -69,3 +69,15 @@ futures-timer = "3.0.3"
 tempfile = "3.27.0"
 # тесты плагина Jira: HTTP-заглушка вместо настоящей Jira
 wiremock = "0.6.5"
+
+# Release-профиль веб-версии: `dx bundle --platform web --release` берёт
+# `wasm-release` сам (без него dx создаёт такой профиль на лету с opt-level "s").
+# Сервис и desktop собираются своими профилями и его не видят. `strip` не
+# задаём: dx на время сборки всё равно ставит strip=false (по символам он
+# находит ассеты), отладочное вырезает wasm-opt (`--debug-symbols=false`).
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

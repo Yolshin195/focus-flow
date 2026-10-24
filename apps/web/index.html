@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{app_title}</title>
+    <meta name="description" content="Трекер фокуса 50/10: 50 минут работы над одним пунктом, 10 минут отдыха и честный учёт потерянного времени. Демо в браузере — без регистрации и без сервера.">
+    <meta name="theme-color" content="#0f1115">
+    <meta name="color-scheme" content="dark">
+    <link rel="icon" href="/{base_path}/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/{base_path}/icon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/{base_path}/apple-touch-icon.png">
+    <link rel="manifest" href="/{base_path}/manifest.webmanifest">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Focus Flow">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:title" content="Focus Flow — таймер фокуса 50/10">
+    <meta property="og:description" content="Трекер фокуса 50/10: 50 минут работы над одним пунктом, 10 минут отдыха и честный учёт потерянного времени. Демо в браузере — без регистрации и без сервера.">
+    <meta property="og:url" content="https://yolshin195.github.io/focus-flow/">
+    <meta property="og:image" content="https://yolshin195.github.io/focus-flow/og.png">
+    <meta property="og:image:width" content="1180">
+    <meta property="og:image:height" content="780">
+    <meta property="og:image:alt" content="Экран «Фокус»: циферблат из минутных рисок, идёт работа над пунктом">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <!-- dx вставляет сюда preload JS-обвязки -->
+    {style_include}
+    <script>
+      // wasm начинает качаться сразу, а не после JS-обвязки. Safari (и все
+      // браузеры iOS) не переиспользует preload as=fetch и скачал бы файл
+      // дважды, поэтому ему подсказки нет.
+      if (navigator.vendor !== "Apple Computer, Inc.") {
+        var wasm = document.createElement("link");
+        wasm.rel = "preload";
+        wasm.as = "fetch";
+        wasm.type = "application/wasm";
+        wasm.crossOrigin = "anonymous";
+        wasm.href = "/{base_path}/{wasm_path}";
+        document.head.appendChild(wasm);
+      }
+    </script>
+    <!-- Шрифты каркаса и первого кадра: в порядке появления на экране. -->
+    <link rel="preload" href="/{base_path}/assets/fonts/inter-cyrillic-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/inter-cyrillic-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/inter-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/inter-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/jetbrains-mono-latin-300-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/inter-cyrillic-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/jetbrains-mono-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/{base_path}/assets/fonts/jetbrains-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+
+    <!-- Critical CSS: дословные правила из apps/ui/assets/tokens.css и
+         main.css для оболочки и экрана «Фокус» в первом кадре. Сверяет тест
+         apps/web/tests/skeleton.rs — правьте источник и копируйте сюда. -->
+    <style id="critical">
+    :root {
+      color-scheme: dark;
+
+      /* Поверхности: фон → панель → карточка → поднятое */
+      --bg: #0f1115;
+      --bg-sidebar: #0c0e11;
+      --surface-1: #15181d;
+      --surface-2: #1b1f25;
+      --surface-3: #232831;
+      --scrim: rgba(6, 7, 9, 0.72);
+
+      /* Линии */
+      --line: rgba(255, 255, 255, 0.06);
+      --line-strong: rgba(255, 255, 255, 0.11);
+
+      /* Текст */
+      --text: #e9ebef;
+      --text-2: #a3a9b4;
+      --text-3: #6c7380;
+      --text-on-accent: #0b0d10;
+
+      /* Сессии — одни и те же везде */
+      --work: #5b8cff;
+      --work-soft: rgba(91, 140, 255, 0.14);
+      --work-glow: rgba(91, 140, 255, 0.10);
+      --rest: #3dd68c;
+      --rest-soft: rgba(61, 214, 140, 0.14);
+      --rest-glow: rgba(61, 214, 140, 0.08);
+      --planning: #f5b841;
+      --planning-soft: rgba(245, 184, 65, 0.14);
+      --planning-glow: rgba(245, 184, 65, 0.07);
+      /* Непрозрачные заливки блоков шкалы дня */
+      --work-block: #1a2335;
+      --rest-block: #14271f;
+      --planning-block: #2a2417;
+      --interrupted-block: #2d1c20;
+      --lost: #5b616c;
+      --lost-soft: rgba(91, 97, 108, 0.22);
+      --interrupted: #d9686e;
+      --interrupted-soft: rgba(217, 104, 110, 0.14);
+
+      /* Шрифты. «… Fallback» — системные шрифты с метриками под Inter и
+         JetBrains Mono (объявлены в index.html веб-версии): пока грузятся
+         настоящие, текст не меняет размеров. На desktop их нет — пропускаются. */
+      --font-ui: "Inter", "Inter Fallback", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-num: "JetBrains Mono", "JetBrains Mono Fallback", ui-monospace, "SF Mono", monospace;
+
+      /* Шкала размеров (≈ 1.2) */
+      --fs-xs: 12px;
+      --fs-sm: 13px;
+      --fs-md: 14px;
+      --fs-lg: 16px;
+      --fs-xl: 20px;
+      --fs-2xl: 26px;
+      --fs-timer: 76px;
+
+      /* Отступы: шаг 4 */
+      --sp-1: 4px;
+      --sp-2: 8px;
+      --sp-3: 12px;
+      --sp-4: 16px;
+      --sp-5: 20px;
+      --sp-6: 24px;
+      --sp-8: 32px;
+      --sp-10: 40px;
+      --sp-12: 48px;
+
+      /* Радиусы: по иерархии */
+      --r-xs: 4px;
+      --r-sm: 6px;
+      --r-md: 10px;
+      --r-lg: 14px;
+      --r-pill: 999px;
+
+      /* Тени — только у плавающего */
+      --shadow-float: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+
+      /* Движение */
+      --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+      --t-fast: 120ms;
+      --t-med: 240ms;
+      --t-slow: 900ms;
+
+      --sidebar-w: 76px;
+      --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(233, 235, 239, 0.55);
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: var(--fs-md);
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "cv11", "ss01";
+      overflow: hidden;
+    }
+    button,
+    input {
+      font: inherit;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+      background: none;
+      border: 0;
+      padding: 0;
+    }
+    button:disabled {
+      cursor: default;
+    }
+    .num {
+      font-family: var(--font-num);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+    .icon {
+      flex: none;
+      display: block;
+    }
+    .app {
+      height: 100%;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      height: 100vh;
+      min-width: 960px;
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sp-6);
+      padding: var(--sp-5) 0 var(--sp-5);
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--line);
+    }
+    .brand {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+    }
+    .brand-track {
+      fill: none;
+      stroke: var(--line-strong);
+      stroke-width: 3;
+    }
+    .brand-arc {
+      fill: none;
+      stroke: var(--work);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+      width: 100%;
+      padding: 0 var(--sp-2);
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      padding: 10px 0 8px;
+      border-radius: var(--r-md);
+      color: var(--text-3);
+      text-decoration: none;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+    }
+    .nav-item:hover {
+      color: var(--text-2);
+      background: var(--surface-1);
+    }
+    .nav-item.active {
+      color: var(--text);
+      background: var(--surface-2);
+    }
+    .nav-bottom {
+      margin-top: auto;
+    }
+    .nav-bottom + .side-progress {
+      margin-top: 0;
+    }
+    .side-progress {
+      margin-top: auto;
+      width: 100%;
+      padding: 0 var(--sp-3);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .side-progress-value {
+      font-size: var(--fs-sm);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .side-progress-of {
+      font-size: 11px;
+      color: var(--text-3);
+      white-space: nowrap;
+    }
+    .side-progress-bar {
+      width: 100%;
+      height: 3px;
+      margin-top: var(--sp-2);
+      border-radius: var(--r-pill);
+      background: var(--surface-3);
+      overflow: hidden;
+    }
+    .side-progress-fill {
+      height: 100%;
+      background: var(--work);
+      border-radius: inherit;
+      transition: width var(--t-slow) var(--ease);
+    }
+    .screen {
+      position: relative;
+      min-width: 0;
+      height: 100vh;
+      overflow: auto;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--sp-2);
+      height: 40px;
+      padding: 0 var(--sp-5);
+      border-radius: var(--r-md);
+      font-size: var(--fs-md);
+      font-weight: 500;
+      white-space: nowrap;
+      transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+        opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+    }
+    .btn:disabled {
+      opacity: 0.38;
+    }
+    .btn-primary:disabled,
+    .btn-primary.btn-work:disabled,
+    .btn-primary.btn-planning:disabled {
+      opacity: 1;
+      background: var(--surface-2);
+      color: var(--text-3);
+      box-shadow: inset 0 0 0 1px var(--line-strong);
+    }
+    .btn-primary {
+      height: 48px;
+      min-width: 200px;
+      padding: 0 var(--sp-8);
+      font-size: var(--fs-lg);
+      font-weight: 600;
+      color: var(--text-on-accent);
+      background: var(--text);
+    }
+    .btn-primary.btn-work {
+      background: var(--work);
+      color: #fff;
+    }
+    .btn-quiet {
+      color: var(--text-2);
+    }
+    .reserved {
+      visibility: hidden;
+    }
+    .focus {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      padding: var(--sp-6) var(--sp-10) var(--sp-8);
+      isolation: isolate;
+    }
+    .focus::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 46%;
+      width: 760px;
+      height: 760px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: radial-gradient(closest-side, var(--glow, transparent), transparent 70%);
+      z-index: -1;
+      transition: background var(--t-slow) var(--ease);
+      pointer-events: none;
+    }
+    .focus-idle { --accent: var(--text-3); --glow: transparent; }
+    .focus-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--sp-6);
+      min-height: 40px;
+    }
+    .day-meta {
+      color: var(--text-3);
+      font-size: var(--fs-sm);
+      padding-top: 2px;
+    }
+    .norm {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--sp-2);
+      width: 220px;
+    }
+    .norm-text {
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+    }
+    .norm-bar {
+      display: flex;
+      width: 100%;
+      height: 4px;
+      gap: 2px;
+      border-radius: var(--r-pill);
+      background: var(--surface-3);
+      overflow: hidden;
+    }
+    .norm-seg {
+      height: 100%;
+      min-width: 0;
+      transition: width var(--t-slow) var(--ease);
+    }
+    .norm-seg:empty[style*="width: 0.000%"] {
+      display: none;
+    }
+    .focus-stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: var(--sp-6);
+    }
+    .session-label {
+      font-size: var(--fs-lg);
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.01em;
+      margin-bottom: var(--sp-5);
+      transition: color var(--t-med) var(--ease);
+    }
+    .focus-idle .session-label {
+      color: var(--text-2);
+    }
+    .ring {
+      position: relative;
+      width: 340px;
+      height: 340px;
+      flex: none;
+    }
+    .ring-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+    .tick {
+      stroke: var(--surface-3);
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      transition: stroke var(--t-med) var(--ease);
+    }
+    .tick.on {
+      stroke: var(--accent);
+    }
+    .tick.edge {
+      stroke: var(--text);
+    }
+    .ring-idle .tick.on {
+      stroke: #343a45;
+    }
+    .ring-track {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.04);
+      stroke-width: 2;
+    }
+    .ring-progress {
+      fill: none;
+      stroke: var(--accent);
+      stroke-opacity: 0.55;
+      stroke-width: 2;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s linear, stroke var(--t-med) var(--ease);
+    }
+    .ring-idle .ring-progress {
+      opacity: 0;
+    }
+    .ring-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--sp-2);
+    }
+    .ring-digits {
+      font-size: var(--fs-timer);
+      font-weight: 300;
+      line-height: 1;
+      letter-spacing: -0.045em;
+      color: var(--text);
+    }
+    .ring-idle .ring-digits {
+      color: var(--text-3);
+    }
+    .ring-sub {
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+    }
+    .focus-context {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sp-2);
+      width: min(520px, 100%);
+      min-height: 64px;
+      margin-top: var(--sp-6);
+      text-align: center;
+    }
+    .item-field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-4);
+      width: 100%;
+      min-height: 56px;
+      padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5);
+      border-radius: var(--r-lg);
+      background: var(--surface-1);
+      border: 1px solid var(--line-strong);
+      color: var(--text-3);
+      text-align: left;
+      transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+    }
+    .focus-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sp-2);
+      margin-top: var(--sp-6);
+      min-height: 48px;
+    }
+    .key-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: var(--sp-3);
+      font-size: var(--fs-xs);
+      color: var(--text-3);
+    }
+    kbd {
+      padding: 1px 6px;
+      border-radius: var(--r-xs);
+      border: 1px solid var(--line-strong);
+      border-bottom-width: 2px;
+      font-family: var(--font-ui);
+      font-size: 11px;
+      color: var(--text-2);
+    }
+    .lost-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: var(--sp-4);
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+    }
+    .lost-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--lost);
+    }
+    @media (max-height: 760px) {
+      .focus {
+        padding-top: var(--sp-5);
+        padding-bottom: var(--sp-5);
+      }
+
+      .ring {
+        width: 280px;
+        height: 280px;
+      }
+
+      .ring-digits {
+        font-size: 64px;
+      }
+
+      .session-label {
+        margin-bottom: var(--sp-3);
+      }
+
+      .focus-context {
+        margin-top: var(--sp-4);
+        min-height: 56px;
+      }
+
+      .focus-actions {
+        margin-top: var(--sp-4);
+      }
+
+      .focus-stage {
+        padding-bottom: 0;
+      }
+    }
+    @media (max-height: 680px) {
+      .ring {
+        width: 244px;
+        height: 244px;
+      }
+
+      .ring-digits {
+        font-size: 56px;
+      }
+
+      .focus-actions .btn-primary {
+        height: 44px;
+      }
+
+      .lost-note {
+        margin-top: var(--sp-2);
+      }
+    }
+    .app:not(.motion) *,
+    .app:not(.motion) *::before,
+    .app:not(.motion) *::after {
+      transition: none !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+    </style>
+    <!-- Только для каркаса веб-версии (на desktop шрифты подключает ui/src/fonts.rs). -->
+    <style id="boot-style">
+      /* Те же файлы и диапазоны, что в ui/src/fonts.rs, но font-display: swap:
+         текст каркаса виден сразу и сменяется на Inter без сдвигов. */
+      @font-face { font-family: "Inter"; font-weight: 400; font-display: swap; src: url("/{base_path}/assets/fonts/inter-cyrillic-400-normal.woff2") format("woff2"); unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116; }
+      @font-face { font-family: "Inter"; font-weight: 400; font-display: swap; src: url("/{base_path}/assets/fonts/inter-latin-400-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+      @font-face { font-family: "Inter"; font-weight: 500; font-display: swap; src: url("/{base_path}/assets/fonts/inter-cyrillic-500-normal.woff2") format("woff2"); unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116; }
+      @font-face { font-family: "Inter"; font-weight: 500; font-display: swap; src: url("/{base_path}/assets/fonts/inter-latin-500-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+      @font-face { font-family: "Inter"; font-weight: 600; font-display: swap; src: url("/{base_path}/assets/fonts/inter-cyrillic-600-normal.woff2") format("woff2"); unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116; }
+      @font-face { font-family: "Inter"; font-weight: 600; font-display: swap; src: url("/{base_path}/assets/fonts/inter-latin-600-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+      @font-face { font-family: "JetBrains Mono"; font-weight: 300; font-display: swap; src: url("/{base_path}/assets/fonts/jetbrains-mono-latin-300-normal.woff2") format("woff2"); }
+      @font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url("/{base_path}/assets/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+      @font-face { font-family: "JetBrains Mono"; font-weight: 500; font-display: swap; src: url("/{base_path}/assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+      /* Системные шрифты с метриками Inter и JetBrains Mono (ширина текста,
+         высота строки): override = метрика шрифта / size-adjust. */
+      @font-face { font-family: "Inter Fallback"; font-weight: 100 549; src: local("Arial"), local("ArialMT"), local("Helvetica"), local("Liberation Sans"), local("LiberationSans"), local("Arimo"); size-adjust: 106.2%; ascent-override: 91.22%; descent-override: 22.71%; line-gap-override: 0%; }
+      @font-face { font-family: "Inter Fallback"; font-weight: 550 900; src: local("Arial Bold"), local("Arial-BoldMT"), local("Helvetica Bold"), local("Liberation Sans Bold"), local("LiberationSans-Bold"), local("Arimo Bold"); size-adjust: 100.8%; ascent-override: 96.11%; descent-override: 23.93%; line-gap-override: 0%; }
+      @font-face { font-family: "JetBrains Mono Fallback"; src: local("Courier New"), local("CourierNewPSMT"), local("Liberation Mono"), local("LiberationMono"), local("Cousine"); size-adjust: 99.1%; ascent-override: 102.93%; descent-override: 30.27%; line-gap-override: 0%; }
+
+      /* Страховка: Dioxus уже дописал своё дерево, а каркас ещё на месте. */
+      #main > #boot:not(:only-child) { display: none; }
+      /* Индикатор загрузки — короткая дуга, бегущая внутри циферблата. */
+      #boot .ring-progress {
+        opacity: 1;
+        stroke: var(--text-2);
+        stroke-dasharray: 72 732.25;
+        transform-origin: 160px 160px;
+        animation: boot-spin 1.6s linear infinite;
+      }
+      @keyframes boot-spin {
+        from { transform: rotate(-90deg); }
+        to { transform: rotate(270deg); }
+      }
+      /* Прямой заход на другой экран: свой пункт меню и только индикатор. */
+      #boot.boot-route .focus { visibility: hidden; }
+      #boot.boot-route .ring-progress { visibility: visible; }
+      .noscript {
+        position: fixed;
+        left: 50%;
+        bottom: var(--sp-6);
+        transform: translateX(-50%);
+        margin: 0;
+        color: var(--text-2);
+        font-size: var(--fs-sm);
+      }
+    </style>
+    <!-- Остальные стили приложения: качаются параллельно с wasm и не
+         задерживают первый кадр (media="print" до загрузки). -->
+    <link rel="stylesheet" href="/{base_path}/assets/main.css" media="print" onload="this.media='all'">
+</head>
+<body>
+    <!-- Каркас — первый кадр приложения до данных (генерирует тест
+         apps/web/tests/skeleton.rs). Убирает его web::Root. -->
+    <div id="main"><!--skeleton--><div class="app platform-web" id="boot" aria-busy="true"><div class="shell"><nav class="sidebar" aria-label="Разделы"><div class="brand" title="Focus Flow"><svg class="brand-mark" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" class="brand-track"></circle><path d="M14 3a11 11 0 0 1 10.46 14.4" class="brand-arc"></path></svg></div><div class="nav"><a href="/{base_path}/" class="nav-item active" aria-current="page"><svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="7"></circle><circle cx="10" cy="10" r="3"></circle></svg><span class="nav-label">Фокус</span></a><a href="/{base_path}/tasks" class="nav-item"><svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5h8M8 10h8M8 14.5h5"></path><path d="M3.5 5.5l1 1 1.8-2M3.5 10h2.5M3.5 14.5h2.5"></path></svg><span class="nav-label">Задачи</span></a><a href="/{base_path}/day" class="nav-item"><svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3v14"></path><rect x="8" y="4" width="8" height="4" rx="1.2"></rect><rect x="8" y="11" width="5" height="5" rx="1.2"></rect></svg><span class="nav-label">День</span></a></div><div class="nav nav-bottom"><a href="/{base_path}/settings" class="nav-item"><svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h6M14 6h2M4 14h2M10 14h6"></path><circle cx="12" cy="6" r="2"></circle><circle cx="8" cy="14" r="2"></circle></svg><span class="nav-label">Настройки</span></a></div><div class="side-progress" title="Норма дня"><div class="side-progress-value num">&nbsp;</div><div class="side-progress-of">&nbsp;</div><div class="side-progress-bar"><div class="side-progress-fill" style="width: 0.00%"></div></div></div></nav><main class="screen"><div class="focus focus-idle"><header class="focus-top"><div class="day-meta"><span class="day-started">&nbsp;</span></div><div class="norm"><div class="norm-text">&nbsp;</div><div class="norm-bar" role="progressbar" aria-valuemin="0" aria-valuemax="28800" aria-valuenow="0"><div class="norm-seg work" style="width: 0.000%"></div><div class="norm-seg planning" style="width: 0.000%"></div></div></div></header><section class="focus-stage" aria-live="polite"><div class="session-label">&nbsp;</div><div class="ring ring-idle"><svg class="ring-svg" viewBox="0 0 320 320" aria-hidden="true"><g class="ticks"><path class="tick on" d="M160.00 24.00L160.00 8.00"></path><path class="tick on" d="M177.67 20.11L179.05 9.20"></path><path class="tick on" d="M195.07 23.43L197.80 12.78"></path><path class="tick on" d="M211.91 28.90L215.95 18.67"></path><path class="tick on" d="M227.93 36.44L233.23 26.80"></path><path class="tick on" d="M239.94 49.97L249.34 37.03"></path><path class="tick on" d="M256.52 57.22L264.05 49.20"></path><path class="tick on" d="M268.64 70.12L277.12 63.11"></path><path class="tick on" d="M279.05 84.45L288.34 78.55"></path><path class="tick on" d="M287.58 99.97L297.53 95.28"></path><path class="tick on" d="M289.34 117.97L304.56 113.03"></path><path class="tick on" d="M298.50 133.58L309.31 131.52"></path><path class="tick on" d="M300.72 151.15L311.70 150.46"></path><path class="tick on" d="M300.72 168.85L311.70 169.54"></path><path class="tick on" d="M298.50 186.42L309.31 188.48"></path><path class="tick on" d="M289.34 202.03L304.56 206.97"></path><path class="tick on" d="M287.58 220.03L297.53 224.72"></path><path class="tick on" d="M279.05 235.55L288.34 241.45"></path><path class="tick on" d="M268.64 249.88L277.12 256.89"></path><path class="tick on" d="M256.52 262.78L264.05 270.80"></path><path class="tick on" d="M239.94 270.03L249.34 282.97"></path><path class="tick on" d="M227.93 283.56L233.23 293.20"></path><path class="tick on" d="M211.91 291.10L215.95 301.33"></path><path class="tick on" d="M195.07 296.57L197.80 307.22"></path><path class="tick on" d="M177.67 299.89L179.05 310.80"></path><path class="tick on" d="M160.00 296.00L160.00 312.00"></path><path class="tick on" d="M142.33 299.89L140.95 310.80"></path><path class="tick on" d="M124.93 296.57L122.20 307.22"></path><path class="tick on" d="M108.09 291.10L104.05 301.33"></path><path class="tick on" d="M92.07 283.56L86.77 293.20"></path><path class="tick on" d="M80.06 270.03L70.66 282.97"></path><path class="tick on" d="M63.48 262.78L55.95 270.80"></path><path class="tick on" d="M51.36 249.88L42.88 256.89"></path><path class="tick on" d="M40.95 235.55L31.66 241.45"></path><path class="tick on" d="M32.42 220.03L22.47 224.72"></path><path class="tick on" d="M30.66 202.03L15.44 206.97"></path><path class="tick on" d="M21.50 186.42L10.69 188.48"></path><path class="tick on" d="M19.28 168.85L8.30 169.54"></path><path class="tick on" d="M19.28 151.15L8.30 150.46"></path><path class="tick on" d="M21.50 133.58L10.69 131.52"></path><path class="tick on" d="M30.66 117.97L15.44 113.03"></path><path class="tick on" d="M32.42 99.97L22.47 95.28"></path><path class="tick on" d="M40.95 84.45L31.66 78.55"></path><path class="tick on" d="M51.36 70.12L42.88 63.11"></path><path class="tick on" d="M63.48 57.22L55.95 49.20"></path><path class="tick on" d="M80.06 49.97L70.66 37.03"></path><path class="tick on" d="M92.07 36.44L86.77 26.80"></path><path class="tick on" d="M108.09 28.90L104.05 18.67"></path><path class="tick on" d="M124.93 23.43L122.20 12.78"></path><path class="tick on edge" d="M142.33 20.11L140.95 9.20"></path></g><circle class="ring-track" cx="160" cy="160" r="128"></circle><circle class="ring-progress" cx="160" cy="160" r="128" stroke-dasharray="804.25" stroke-dashoffset="0.00" transform="rotate(-90 160 160)"></circle></svg><div class="ring-center"><div class="ring-digits num">&nbsp;</div><div class="ring-sub">&nbsp;</div></div></div><div class="focus-context"><div class="item-field" aria-hidden="true"></div></div><div class="focus-actions"><button class="btn btn-primary btn-work" disabled=true>Начать 50 минут</button><button class="btn btn-quiet reserved" disabled=true>Планировать</button></div><div class="key-hint reserved"><kbd>Пробел</kbd><span>выбрать пункт</span></div><div class="lost-note reserved"><span class="lost-dot"></span>Потеряно: <span class="num">0 мин</span></div></section></div></main></div></div><!--/skeleton--></div>
+    <script>
+      // Прямой заход на /tasks, /day, /settings (Pages отдаёт 404.html):
+      // в каркасе подсвечен нужный пункт меню, экран «Фокус» не показан.
+      (function () {
+        var base = "/{base_path}";
+        var path = location.pathname;
+        var route = (path.indexOf(base) === 0 ? path.slice(base.length) : path).replace(/\/+$/, "");
+        if (!route) return;
+        var boot = document.getElementById("boot");
+        boot.classList.add("boot-route");
+        var links = boot.querySelectorAll(".nav-item");
+        for (var i = 0; i < links.length; i++) {
+          var on = links[i].getAttribute("href") === base + route;
+          links[i].classList.toggle("active", on);
+          if (on) links[i].setAttribute("aria-current", "page");
+          else links[i].removeAttribute("aria-current");
+        }
+      })();
+    </script>
+    <script>
+      // Офлайн и мгновенный повторный запуск — public/sw.js. Только в
+      // release-сборке (у dx serve wasm лежит не в assets/) и после запуска
+      // приложения: wasm уже скачан, SW возьмёт его из HTTP-кэша.
+      if ("serviceWorker" in navigator && "{wasm_path}".indexOf("assets/") === 0) {
+        new MutationObserver(function (_, observer) {
+          if (document.getElementById("boot")) return;
+          observer.disconnect();
+          navigator.serviceWorker.register("/{base_path}/sw.js", {
+            scope: "/{base_path}/",
+            updateViaCache: "none",
+          });
+        }).observe(document.getElementById("main"), { childList: true });
+      }
+    </script>
+    <noscript><p class="noscript">Focus Flow работает на WebAssembly — включите JavaScript.</p></noscript>
+</body>
+</html>

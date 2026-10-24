@@ -1,0 +1,13 @@
+[package]
+name = "focus-api-contract-tests"
+description = "Сценарии поведения Focus Flow против &dyn FocusApi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+focus-api-types = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }

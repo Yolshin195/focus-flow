@@ -1,0 +1,20 @@
+[package]
+name = "focus-api-types"
+description = "Контракт клиента и сервиса Focus Flow: DTO, ошибки, события, трейт FocusApi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+# В браузере: uuid `v7` берёт случайность через `js`, а chrono `Utc::now()` —
+# через `wasmbind` (иначе паника). Нужно MockApi в web-клиенте.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+uuid = { workspace = true, features = ["js"] }

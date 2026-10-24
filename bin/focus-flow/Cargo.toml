@@ -1,0 +1,27 @@
+[package]
+name = "focus-flow"
+description = "CLI Focus Flow: serve | token | ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["notify", "mcp", "jira", "ui"]
+# Команда `focus-flow ui`: desktop-окно (Dioxus) и сервис в одном процессе.
+# Без фичи — только сервис (например, для VDS без WebKit).
+ui = ["dep:desktop"]
+# Системные уведомления сервиса (см. focus-server).
+notify = ["focus-server/notify"]
+# MCP на /mcp.
+mcp = ["focus-server/mcp"]
+# Плагин Jira.
+jira = ["focus-server/jira"]
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+desktop = { workspace = true, optional = true }
+focus-server = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,26 +1,23 @@
-# Development
+# desktop — Focus Flow для Linux/macOS/Windows
 
-The desktop crate defines the entrypoint for the desktop app along with any assets, components and dependencies that are specific to desktop builds. The desktop crate starts out something like this:
-
-```
-desktop/
-├─ assets/ # Assets used by the desktop app - Any platform specific assets should go in this folder
-├─ src/
-│  ├─ main.rs # The entrypoint for the desktop app.It also defines the routes for the desktop platform
-│  ├─ views/ # The views each route will render in the desktop version of the app
-│  │  ├─ mod.rs # Defines the module for the views route and re-exports the components for each route
-│  │  ├─ blog.rs # The component that will render at the /blog/:id route
-│  │  ├─ home.rs # The component that will render at the / route
-├─ Cargo.toml # The desktop crate's Cargo.toml - This should include all desktop specific dependencies
-```
-
-## Dependencies
-This crate will only be included in the desktop build, so you should add all desktop specific dependencies to this crate's [Cargo.toml](../Cargo.toml) file instead of the shared [ui](../ui/Cargo.toml) crate.
-
-### Serving Your Desktop App
-
-You can start your desktop app with the following command:
+`lib.rs`: `DesktopPlatform` (уведомления через `notify-rust`), `HttpApi` (или `MockApi` в режиме демо) в контексте, окно 1180×780 (минимум 960×640); вход — `desktop::launch(Options, on_exit)`. Его вызывают `main.rs` (для `dx serve`/`dx build`) и `focus-flow ui` (окно + сервис в одном процессе).
 
 ```bash
-dx serve
+dx serve            # разработка
+dx build            # сборка
 ```
+
+Переменные для демо и скриншотов:
+
+- `FOCUS_MOCK_SCENARIO` — `idle` (по умолчанию), `work`, `rest`, `planning`, `picker`, `interrupt`, `done-choice`, `tasks`, `day`, `settings`, `empty`;
+- `FOCUS_MOCK_JIRA=off` — Jira в моке не настроена;
+- `FOCUS_MOCK_SPEED` — ускорение часов мока (`60` — минута за секунду, `0` — часы стоят).
+
+## Сервис
+
+По умолчанию клиент подключается к `focus-flow serve`:
+
+- `FOCUS_ADDR` — адрес (по умолчанию `127.0.0.1:7878`);
+- `FOCUS_TOKEN` — токен; без него читается файл `token` из `FOCUS_DATA_DIR` или из каталога данных сервиса (`~/.local/share/focus-flow/token` на Linux).
+
+`FOCUS_MOCK=1` (или любой `FOCUS_MOCK_SCENARIO`) запускает клиент на `MockApi` без сервиса.

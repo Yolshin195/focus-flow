@@ -1061,6 +1061,42 @@ kbd {
   margin-bottom: var(--sp-6);
 }
 
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+}
+
+/* Итог синхронизации с Jira под шапкой «Задач» */
+.sync-note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: calc(var(--sp-6) * -0.5) 0 var(--sp-5);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.sync-note span {
+  flex: 1;
+  min-width: 0;
+}
+
+.sync-note.ok > .icon {
+  flex: none;
+  color: var(--rest);
+}
+
+.sync-note.err {
+  color: var(--interrupted);
+}
+
 .page-title {
   margin: 0;
   font-size: var(--fs-2xl);
@@ -2729,6 +2765,23 @@ textarea.item-card-title:focus {
   font-size: var(--fs-xs);
 }
 
+/* Синхронизация с Jira */
+.sync-card {
+  margin-top: var(--sp-4);
+}
+
+.sync-last {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-5) var(--sp-5);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.sync-card > .queue-hint:last-child {
+  padding-bottom: var(--sp-5);
+}
+
 /* Очередь отправки в Jira */
 .queue-card {
   margin-top: var(--sp-4);
@@ -2799,6 +2852,7 @@ textarea.item-card-title:focus {
 .queue-kind.add { color: var(--work); }
 .queue-kind.done { color: var(--rest); }
 .queue-kind.worklog { color: var(--planning); }
+.queue-kind.undone { color: var(--text-2); }
 
 .queue-main {
   display: flex;
@@ -3122,7 +3176,8 @@ textarea.item-card-title:focus {
   }
 
   .queue-hint,
-  .queue-empty {
+  .queue-empty,
+  .sync-last {
     padding-left: var(--sp-4);
     padding-right: var(--sp-4);
   }

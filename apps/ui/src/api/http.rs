@@ -21,7 +21,9 @@ use reqwest::{Method, RequestBuilder, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use super::jira::{JiraPatch, JiraQueue, JiraSettingsApi, JiraState, JiraTestResult};
+use super::jira::{
+    JiraPatch, JiraQueue, JiraSettingsApi, JiraState, JiraSyncResult, JiraTestResult,
+};
 
 /// Таймаут обычного запроса. Сервис локальный — дольше ждать незачем.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -259,6 +261,9 @@ impl JiraSettingsApi for HttpApi {
     }
     async fn drop_jira_op(&self, id: i64) -> ApiResult<JiraQueue> {
         self.delete(&format!("/api/plugins/jira/queue/{id}")).await
+    }
+    async fn sync_jira(&self) -> ApiResult<JiraSyncResult> {
+        self.post("/api/plugins/jira/sync").await
     }
 }
 

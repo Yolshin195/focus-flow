@@ -1,5 +1,5 @@
-//! Экран «Настройки»: подключение к Jira, состояние плагина и очередь
-//! отправки (что плагин собирается записать в Jira).
+//! Экран «Настройки»: подключение к Jira, состояние плагина, синхронизация
+//! из Jira и очередь отправки (что плагин собирается записать в Jira).
 //!
 //! Данные — через [`JiraSettingsApi`](crate::api::JiraSettingsApi) из
 //! [`ApiHandle`](crate::ApiHandle) и `FocusApi::plugin_status`. Форма
@@ -11,10 +11,12 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use focus_api_types::{ApiError, PluginStatusDto};
 
-use crate::api::{JiraMode, JiraOp, JiraOpKind, JiraPatch, JiraQueue, JiraState, JiraWorklog};
+use crate::api::{
+    JiraMode, JiraOp, JiraOpKind, JiraPatch, JiraQueue, JiraState, JiraSyncResult, JiraWorklog,
+};
 use crate::components::{Icon, TextInput};
 use crate::fmt;
-use crate::state::{error_text, use_api};
+use crate::state::{error_text, refresh_tasks, use_api, use_app};
 
 /// Как часто обновлять состояние плагина (очередь, последняя ошибка).
 const STATUS_POLL: Duration = Duration::from_secs(10);
@@ -29,6 +31,7 @@ struct Form {
     field: String,
     worklog: JiraWorklog,
     auto_send: bool,
+    auto_sync: bool,
 }
 
 impl Form {
@@ -41,6 +44,7 @@ impl Form {
             field: s.checklist_field_id.clone().unwrap_or_default(),
             worklog: s.worklog,
             auto_send: s.auto_send,
+            auto_sync: s.auto_sync,
         }
     }
 
@@ -61,6 +65,7 @@ impl Form {
             checklist_field_id: self.field.trim().to_owned(),
             worklog: self.worklog,
             auto_send: self.auto_send,
+            auto_sync: self.auto_sync,
             token: (!token.is_empty()).then(|| token.to_owned()),
         }
     }
@@ -87,6 +92,8 @@ struct Page {
     queue: Signal<Option<JiraQueue>>,
     queue_notice: Signal<Option<Notice>>,
     queue_busy: Signal<bool>,
+    sync_notice: Signal<Option<Notice>>,
+    sync_busy: Signal<bool>,
 }
 
 /// Перечитать настройки и состояние плагина. `reset_form` — заполнить
@@ -154,6 +161,8 @@ pub fn Settings() -> Element {
         queue: use_signal(|| None),
         queue_notice: use_signal(|| None),
         queue_busy: use_signal(|| false),
+        sync_notice: use_signal(|| None),
+        sync_busy: use_signal(|| false),
     };
 
     let api_poll = api.clone();
@@ -352,7 +361,7 @@ pub fn Settings() -> Element {
                     }
                     FormRow {
                         label: "Поле чек-листа",
-                        hint: "Необязательно: id текстового поля «Checklists» из Smart Checklist. Пусто — плагин найдёт его сам по имени.",
+                        hint: "Необязательно: чек-лист читается и пишется через свойство задачи Smart Checklist, а текстовое поле «Checklists» — запасной источник для чтения. Пусто — плагин найдёт его сам по имени.",
                         label { class: "field",
                             TextInput {
                                 reset: rev,
@@ -376,6 +385,17 @@ pub fn Settings() -> Element {
                                 label: "Отправлять автоматически",
                                 on: f.auto_send,
                                 on_toggle: move |v| form.write().auto_send = v,
+                            }
+                        }
+                    }
+                    FormRow {
+                        label: "Синхронизация",
+                        hint: "Выключено — изменения из Jira забираются кнопкой «Синхронизировать»; включено — раз в 5 минут",
+                        div { class: "toggles",
+                            Toggle {
+                                label: "Синхронизировать автоматически",
+                                on: f.auto_sync,
+                                on_toggle: move |v| form.write().auto_sync = v,
                             }
                         }
                     }
@@ -431,6 +451,7 @@ pub fn Settings() -> Element {
                 }
             }
             if saved.is_some() {
+                SyncCard { page }
                 QueueCard { page }
             }
             p { class: "settings-note",
@@ -502,6 +523,136 @@ fn PluginBadge(state: Option<JiraState>, plugin: Option<PluginStatusDto>) -> Ele
             }
             if let Some(d) = detail {
                 span { class: "plugin-detail", title: "{d}", "{d}" }
+            }
+        }
+    }
+}
+
+/// Итог синхронизации одной фразой: (всё прошло, текст).
+pub(crate) fn sync_summary(r: &JiraSyncResult) -> (bool, String) {
+    if r.tasks == 0 && r.failed == 0 {
+        return (true, "Задач из Jira нет — синхронизировать нечего.".into());
+    }
+    let tasks = format!(
+        "{} {}",
+        r.tasks,
+        fmt::plural(r.tasks as usize, "задача", "задачи", "задач")
+    );
+    let mut parts = Vec::new();
+    if r.added_items > 0 {
+        parts.push(format!("новых пунктов {}", r.added_items));
+    }
+    if r.updated_items > 0 {
+        parts.push(format!("обновлено статусов {}", r.updated_items));
+    }
+    if r.renamed > 0 {
+        parts.push(format!("переименовано задач {}", r.renamed));
+    }
+    let mut text = if parts.is_empty() {
+        format!("Проверено {tasks}: изменений в Jira нет.")
+    } else {
+        format!("Проверено {tasks}: {}.", parts.join(", "))
+    };
+    if r.kept_local > 0 {
+        text.push_str(&format!(
+            " Пунктов с неотправленными изменениями не тронуто: {}.",
+            r.kept_local
+        ));
+    }
+    match &r.error {
+        Some(e) => {
+            text.push_str(&format!(" Не получено задач: {} — {e}", r.failed));
+            (false, text)
+        }
+        None => (true, text),
+    }
+}
+
+/// Карточка «Синхронизация с Jira»: забрать изменения из Jira по всем
+/// задачам кнопкой и итог последней синхронизации.
+#[component]
+fn SyncCard(page: Page) -> Element {
+    let api = use_api();
+    let app = use_app();
+    let Some(s) = page.saved.read().clone() else {
+        return rsx! {};
+    };
+    let busy = (page.sync_busy)();
+    let every = if s.sync_every_min > 0 {
+        s.sync_every_min
+    } else {
+        5
+    };
+    let hint = if s.auto_sync {
+        format!(
+            "Автосинхронизация включена: изменения из Jira приходят сами раз в {every} мин. Кнопка — забрать их сейчас."
+        )
+    } else {
+        "Новые строки чек-листа, отметки и название задачи, изменённые в Jira, сами не приходят — нажми «Синхронизировать». Неотправленные изменения у нас не затрутся.".to_owned()
+    };
+    let last = s.last_sync.clone().map(|r| {
+        let at = r.at.map(fmt::local_hm).unwrap_or_default();
+        (at, sync_summary(&r).1)
+    });
+
+    let sync = move |_| {
+        let api = api.clone();
+        let mut p = page;
+        spawn(async move {
+            p.sync_busy.set(true);
+            p.sync_notice.set(None);
+            let notice = match api.jira().sync_jira().await {
+                Ok(r) => match sync_summary(&r) {
+                    (true, text) => Notice::Ok(text),
+                    (false, text) => Notice::Err(text),
+                },
+                Err(e) => Notice::Err(test_error_text(&e)),
+            };
+            p.sync_notice.set(Some(notice));
+            refresh_tasks(&api, app).await;
+            reload(&api, p, false).await;
+            p.sync_busy.set(false);
+        });
+    };
+
+    rsx! {
+        section { class: "card settings-card sync-card", "aria-labelledby": "sync-title",
+            div { class: "card-head",
+                div { class: "card-head-title",
+                    h2 { id: "sync-title", class: "card-title", "Синхронизация с Jira" }
+                }
+                button {
+                    class: "btn btn-secondary btn-small",
+                    disabled: busy || !s.configured,
+                    title: if s.configured { "Забрать изменения из Jira по всем задачам" } else { "Сначала настрой подключение" },
+                    onclick: sync,
+                    {Icon::Sync.render(14)}
+                    "Синхронизировать"
+                }
+            }
+            p { class: "queue-hint", "{hint}" }
+            if let Some((at, text)) = last.filter(|_| page.sync_notice.read().is_none() && !busy) {
+                p { class: "sync-last",
+                    "Последняя: "
+                    span { class: "num", "{at}" }
+                    " · {text}"
+                }
+            }
+            if busy || page.sync_notice.read().is_some() {
+                div { class: "card-foot",
+                    if busy {
+                        span { class: "notice notice-wait", "Синхронизация…" }
+                    } else if let Some(n) = page.sync_notice.read().clone() {
+                        match n {
+                            Notice::Ok(text) => rsx! {
+                                span { class: "notice notice-ok", role: "status", {Icon::Check.render(14)} "{text}" }
+                            },
+                            Notice::Err(text) => rsx! {
+                                span { class: "notice notice-err", role: "alert", "{text}" }
+                            },
+                        }
+                    }
+                }
             }
         }
     }
@@ -641,6 +792,7 @@ fn QueueRow(op: JiraOp, busy: bool, on_drop: EventHandler<i64>) -> Element {
     let (icon, label, class) = match op.kind {
         JiraOpKind::ChecklistAdd => (Icon::Plus, "Новый пункт", "queue-kind add"),
         JiraOpKind::ChecklistDone => (Icon::Check, "Пункт готов", "queue-kind done"),
+        JiraOpKind::ChecklistUndone => (Icon::Minus, "Снять отметку", "queue-kind undone"),
         JiraOpKind::Worklog => (Icon::Play, "Worklog", "queue-kind worklog"),
         JiraOpKind::Unknown => (Icon::External, "Операция", "queue-kind"),
     };

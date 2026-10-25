@@ -132,10 +132,26 @@ pub fn find_line(text: &str, target: &str) -> Option<usize> {
 /// Отметить строку `idx` как сделанную (`+`). `None` — уже `+` или не пункт.
 /// Остальной текст (другие строки, переводы строк) не меняется.
 pub fn set_done(text: &str, idx: usize) -> Option<String> {
+    set_marker(text, idx, |m| m != Some(Marker::Done), '+')
+}
+
+/// Снять отметку со строки `idx` (`+` → `-`). `None` — строка и так не
+/// сделана (`-`, `~`, `x`, без маркера) или не пункт.
+pub fn set_todo(text: &str, idx: usize) -> Option<String> {
+    set_marker(text, idx, |m| m == Some(Marker::Done), '-')
+}
+
+/// Поставить маркер `to` строке `idx`, если `change(маркер)`.
+fn set_marker(
+    text: &str,
+    idx: usize,
+    change: impl Fn(Option<Marker>) -> bool,
+    to: char,
+) -> Option<String> {
     let mut lines: Vec<String> = text.split('\n').map(str::to_owned).collect();
     let line = lines.get_mut(idx)?;
     let parsed = parse_line(line)?;
-    if parsed.marker == Some(Marker::Done) {
+    if !change(parsed.marker) {
         return None;
     }
     let indent_len = line.len() - line.trim_start().len();
@@ -144,12 +160,20 @@ pub fn set_done(text: &str, idx: usize) -> Option<String> {
         Some(_) => {
             let mut chars = body.chars();
             chars.next();
-            format!("{indent}+{}", chars.as_str())
+            format!("{indent}{to}{}", chars.as_str())
         }
-        None => format!("{indent}+ {body}"),
+        None => format!("{indent}{to} {body}"),
     };
     *line = new;
     Some(lines.join("\n"))
+}
+
+/// Статус пункта по строке `idx` (`None` — не пункт).
+pub fn status_at(text: &str, idx: usize) -> Option<TaskStatus> {
+    text.split('\n')
+        .nth(idx)
+        .and_then(parse_line)
+        .map(|l| l.status())
 }
 
 /// Дописать пункт `- title` в конец.
@@ -236,6 +260,18 @@ mod tests {
         assert_eq!(set_done(t, 2).unwrap(), "- a\r\n  ~ b\r\n+ c\n+ d");
         assert_eq!(set_done(t, 3), None);
         assert_eq!(set_done(t, 9), None);
+    }
+
+    #[test]
+    fn set_todo_only_unchecks_done() {
+        let t = "+ a\r\n  + b\n- c\n~ d\nx e";
+        assert_eq!(set_todo(t, 0).unwrap(), "- a\r\n  + b\n- c\n~ d\nx e");
+        assert_eq!(set_todo(t, 1).unwrap(), "+ a\r\n  - b\n- c\n~ d\nx e");
+        for i in [2, 3, 4, 9] {
+            assert_eq!(set_todo(t, i), None, "{i}");
+        }
+        assert_eq!(status_at(t, 3), Some(TaskStatus::InProgress));
+        assert_eq!(status_at(t, 9), None);
     }
 
     #[test]

@@ -16,8 +16,8 @@ mod token;
 pub use app::App;
 pub use config::{Config, DEFAULT_ADDR};
 pub use plugins::{
-    OUTBOX_POLL, PluginRegistry, Registration, builtin_plugins, plugin_enabled, plugin_enabled_or,
-    run_outbox_worker,
+    OUTBOX_POLL, PLUGIN_TICK, PluginRegistry, Registration, builtin_plugins, plugin_enabled,
+    plugin_enabled_or, run_outbox_worker, run_plugin_ticker,
 };
 pub use server::{router, run, run_until};
 pub use timer::{POLL, run_timer};

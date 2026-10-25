@@ -233,6 +233,32 @@ pub struct ImportedItem {
     pub status: TaskStatus,
 }
 
+/// Свежее состояние задачи в источнике, которое плагин применяет при
+/// синхронизации ([`crate::FocusService::apply_source`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceUpdate {
+    /// Новое название задачи; `None` — не менять.
+    pub title: Option<String>,
+    /// Новые статусы пунктов этой задачи (чужие id пропускаются).
+    pub statuses: Vec<(TaskId, TaskStatus)>,
+    /// Новые пункты — в конец задачи, в этом порядке.
+    pub new_items: Vec<ImportedItem>,
+}
+
+/// Итог [`crate::FocusService::apply_source`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceApplied {
+    /// Название задачи изменилось.
+    pub renamed: bool,
+    /// Пункты, у которых изменился статус.
+    pub updated: Vec<TaskId>,
+    /// Созданные пункты по порядку `new_items`; `None` — пропущен (пустое
+    /// название или пункт с таким названием уже есть).
+    pub created: Vec<Option<TaskId>>,
+    /// Задача с пунктами после изменений.
+    pub task: TaskDto,
+}
+
 /// Задача, полученная из внешнего источника (`TaskSource`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportedTask {

@@ -38,6 +38,10 @@ const BATCH: usize = 32;
 const EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Как часто воркер outbox проверяет очередь.
 pub const OUTBOX_POLL: Duration = Duration::from_secs(1);
+/// Как часто звать [`Plugin::tick`] включённых плагинов.
+pub const PLUGIN_TICK: Duration = Duration::from_secs(60);
+/// Предел времени одного [`Plugin::tick`].
+const TICK_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Плагин для регистрации: обычный или источник задач.
 #[derive(Clone)]
@@ -262,6 +266,34 @@ impl PluginRegistry {
         Ok(handled)
     }
 
+    /// Один проход [`Plugin::tick`] по включённым плагинам, по очереди.
+    /// Ошибка плагина пишется в лог и не мешает остальным.
+    pub async fn tick(&self) {
+        for e in &self.entries {
+            let id = e.plugin.id();
+            if !self.is_enabled(id) {
+                continue;
+            }
+            let fut = e.plugin.tick(&e.ctx);
+            match tokio::time::timeout(TICK_TIMEOUT, fut)
+                .instrument(e.ctx.span().clone())
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    tracing::warn!(plugin = id, error = %format!("{err:#}"), "фоновая работа плагина не удалась");
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        plugin = id,
+                        "фоновая работа плагина дольше {} с",
+                        TICK_TIMEOUT.as_secs()
+                    );
+                }
+            }
+        }
+    }
+
     /// Маршруты плагинов, вложенные в `/api/plugins/<id>`; пока плагин
     /// выключен — `503 plugin_unavailable`. Проверки доступа добавляет
     /// вызывающий (`focus-server::router`).
@@ -443,6 +475,27 @@ pub async fn run_outbox_worker(
         }
     }
     tracing::debug!("воркер outbox остановлен");
+}
+
+/// Фоновая работа плагинов до отмены `cancel`: [`PluginRegistry::tick`]
+/// раз в `every` (первый проход — через `every` после старта).
+pub async fn run_plugin_ticker(
+    registry: Arc<PluginRegistry>,
+    every: Duration,
+    cancel: CancellationToken,
+) {
+    tracing::debug!("фоновая работа плагинов запущена");
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => break,
+            () = tokio::time::sleep(every) => {}
+        }
+        tokio::select! {
+            () = cancel.cancelled() => break,
+            () = registry.tick() => {}
+        }
+    }
+    tracing::debug!("фоновая работа плагинов остановлена");
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

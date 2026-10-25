@@ -41,6 +41,7 @@ struct Fake {
     id: &'static str,
     fail: AtomicU32,
     seen: Mutex<Vec<String>>,
+    ticks: AtomicU32,
 }
 
 impl Fake {
@@ -49,6 +50,7 @@ impl Fake {
             id,
             fail: AtomicU32::new(0),
             seen: Mutex::default(),
+            ticks: AtomicU32::new(0),
         })
     }
     fn seen(&self) -> Vec<String> {
@@ -60,6 +62,7 @@ fn describe(ev: &DomainEvent) -> String {
     match ev {
         DomainEvent::ItemCreated { task, .. } => format!("created:{}", task.title),
         DomainEvent::ItemCompleted { task, .. } => format!("completed:{}", task.title),
+        DomainEvent::ItemReopened { task, .. } => format!("reopened:{}", task.title),
         DomainEvent::SessionClosed { session, .. } => format!("closed:{:?}", session.kind),
         DomainEvent::TaskImported { task, .. } => format!("imported:{}", task.title),
         DomainEvent::Unknown => "unknown".into(),
@@ -93,6 +96,13 @@ impl Plugin for Fake {
             .execute(ctx.pool())
             .await?;
         self.seen.lock().unwrap().push(d);
+        Ok(())
+    }
+
+    async fn tick(&self, _: &PluginCtx) -> anyhow::Result<()> {
+        if self.ticks.fetch_add(1, Ordering::SeqCst) == 0 {
+            anyhow::bail!("первый проход падает");
+        }
         Ok(())
     }
 
@@ -250,6 +260,25 @@ async fn enabled_plugin_receives_events_in_order() {
     // Повторно не доставляется.
     assert_eq!(e.deliver().await, 0);
     assert_eq!(fake.seen().len(), 2);
+}
+
+/// Фоновая работа: `tick` только у включённых, ошибка не мешает следующим.
+#[tokio::test]
+async fn tick_reaches_enabled_plugins_only() {
+    let fake = Fake::new("fake");
+    let other = Fake::new("other");
+    let e = env(vec![
+        Registration::Plugin(fake.clone()),
+        Registration::Plugin(other.clone()),
+    ])
+    .await;
+    e.app.plugins.tick().await;
+    assert_eq!(fake.ticks.load(Ordering::SeqCst), 0);
+    e.enable(&["fake"], true).await;
+    e.app.plugins.tick().await; // первый проход падает — только в лог
+    e.app.plugins.tick().await;
+    assert_eq!(fake.ticks.load(Ordering::SeqCst), 2);
+    assert_eq!(other.ticks.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

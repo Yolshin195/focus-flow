@@ -25,6 +25,14 @@ pub enum DomainEvent {
         /// Родитель, если есть.
         parent: Option<Task>,
     },
+    /// Готовый узел снова открыт (`done` → `planned`/`in_progress`): сняли
+    /// отметку. Переход `done` → `cancelled` его не публикует.
+    ItemReopened {
+        /// Узел после изменения.
+        task: Task,
+        /// Родитель, если есть.
+        parent: Option<Task>,
+    },
     /// Сессия закрыта (любой вид и причина).
     SessionClosed {
         /// Закрытая сессия.
@@ -54,6 +62,7 @@ impl DomainEvent {
         match self {
             Self::ItemCreated { .. } => "item_created",
             Self::ItemCompleted { .. } => "item_completed",
+            Self::ItemReopened { .. } => "item_reopened",
             Self::SessionClosed { .. } => "session_closed",
             Self::TaskImported { .. } => "task_imported",
             Self::Unknown => "unknown",

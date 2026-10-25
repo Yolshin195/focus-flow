@@ -55,13 +55,18 @@ pub struct JiraSettings {
     /// Email учётной записи (только Cloud).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    /// Id текстового поля чек-листа «Checklists» (`customfield_10100`); без него — автопоиск.
+    /// Id текстового поля чек-листа «Checklists» (`customfield_10100`); без
+    /// него — автопоиск. Только для чтения, когда Jira не отдала свойство
+    /// чек-листа: пишется чек-лист всегда в свойство.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checklist_field_id: Option<String>,
     /// Правила worklog.
     pub worklog: WorklogSettings,
     /// Отправлять очередь в Jira сразу; по умолчанию — только кнопкой «Отправить».
     pub auto_send: bool,
+    /// Забирать изменения из Jira сами (раз в [`crate::SYNC_EVERY`]); по
+    /// умолчанию — только кнопкой «Синхронизировать».
+    pub auto_sync: bool,
 }
 
 impl JiraSettings {
@@ -163,6 +168,7 @@ mod tests {
         assert_eq!(s.mode, Mode::DataCenter);
         assert!(s.worklog.work && s.worklog.interrupted && !s.worklog.planning);
         assert!(!s.auto_send);
+        assert!(!s.auto_sync);
         assert_eq!(s.conn(Some("t".into())).unwrap_err(), "не задан base_url");
 
         let s = JiraSettings::from_value(&json!({

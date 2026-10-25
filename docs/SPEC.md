@@ -85,7 +85,7 @@ pub trait TaskSource: Plugin {
 }
 ```
 
-- Ядро публикует `DomainEvent`: `ItemCreated`, `ItemCompleted`, `SessionClosed`, `TaskImported`.
+- Ядро публикует `DomainEvent`: `ItemCreated`, `ItemCompleted`, `ItemReopened` (готовый пункт снова открыт), `SessionClosed`, `TaskImported`.
 - Доставка — через таблицу `outbox` и фоновый воркер с повторами (экспоненциальная задержка). Без сети ничего не теряется; ошибки видны в UI (`/api/plugins/status`).
 - Подключение: cargo features + `enabled` в конфиге. Без динамической загрузки.
 - REST и MCP — входы, не плагины. MCP отдаёт инструменты ядра + `mcp_tools()` включённых плагинов.
@@ -95,13 +95,14 @@ pub trait TaskSource: Plugin {
 - Задача Jira ↔ наша задача верхнего уровня. Пункты = строки **Smart Checklist** (Railsware) этой задачи.
 - **Импорт по ссылке/ключу:** создаёт задачу (название, URL) и сразу все строки чек-листа как пункты. Статусы: `+` → done, `x` → cancelled, остальное → planned. Повторный импорт не дублирует, а догружает новые строки.
 - **Новый пункт у нас** → добавляется строкой `- текст` в Smart Checklist.
-- **Пункт готов** → строка меняется на `+ текст`.
+- **Пункт готов** → строка меняется на `+ текст`. **Отметку сняли** (готовый пункт снова открыт) → строка снова `- текст`.
 - **Worklog** — на саму задачу Jira (не на пункт): `started` = реальное начало, `timeSpentSeconds` = длительность, `comment` = текст пункта. По умолчанию списываются сессии `work` с любым `end_reason` (включая `interrupted`); `planning` — нет. Оба правила — в настройках плагина.
-- Smart Checklist хранится в кастомном поле задачи «Checklists» (текст, строка на пункт, маркеры `-` todo, `+` done, `~` in progress, `x` skipped). Писать — только целиком через `PUT /rest/api/2/issue/{key}` с этим полем. ID поля ищется при настройке через `GET /rest/api/2/field` по имени (можно задать вручную). У строк нет ID → сопоставление по тексту; перед каждой записью — перечитать поле и применить изменение к свежему тексту.
+- Smart Checklist хранит чек-лист в свойстве задачи `com.railsware.SmartChecklist.checklist` (текст, строка на пункт, маркеры `-` todo, `+` done, `~` in progress, `x` skipped). Кастомное поле «Checklists» — его копия только для чтения: обычно его нет на экране редактирования, и `PUT /rest/api/2/issue/{key}` с ним отвечает 400. Читать — свойство (`GET /rest/api/2/issue/{key}?properties=com.railsware.SmartChecklist.checklist`), без него — поле «Checklists» (ID ищется через `GET /rest/api/2/field` по имени или задаётся вручную), а если нет и поля — `GET …/issue/{id}/properties/com.railsware.SmartChecklist.checklist`. Писать — только целиком: `PUT /rest/api/2/issue/{id}/properties/com.railsware.SmartChecklist.checklist`, тело — JSON-строка с текстом; пункты, прогресс и поле Smart Checklist обновляет сам. У строк нет ID → сопоставление по тексту; перед каждой записью — перечитать чек-лист и применить изменение к свежему тексту.
 - Авторизация — **только API-токен**. Два режима: Data Center/Server — `Authorization: Bearer <PAT>`; Cloud — Basic `email:token`. Режим и base URL — в настройках. Какой у пользователя — пока не подтверждено, поддержать оба.
 - Тесты — на `wiremock`, без реальной Jira.
-- **Очередь отправки.** Новые строки, отметки «готово» и worklog не уходят в Jira сразу, а копятся в очереди плагина: её видно на экране «Настройки», лишнее можно убрать, остальное — отправить кнопкой «Отправить». Настройка «Отправлять автоматически» (`auto_send`, по умолчанию выключена) отправляет очередь сразу. Маршруты: `GET /api/plugins/jira/queue`, `POST …/queue/send`, `DELETE …/queue/{id}`.
-- Таблицы плагина: `jira_links(task_id, issue_key, url)`, `jira_items(item_id, issue_key, line_text)`, `jira_worklogs(session_id, issue_key, worklog_id, status)`, `jira_queue` (очередь отправки).
+- **Очередь отправки.** Новые строки, отметки «готово», снятие отметки и worklog не уходят в Jira сразу, а копятся в очереди плагина: её видно на экране «Настройки», лишнее можно убрать, остальное — отправить кнопкой «Отправить». Настройка «Отправлять автоматически» (`auto_send`, по умолчанию выключена) отправляет очередь сразу. Маршруты: `GET /api/plugins/jira/queue`, `POST …/queue/send`, `DELETE …/queue/{id}`.
+- **Синхронизация из Jira.** Кнопка «Синхронизировать» (`POST /api/plugins/jira/sync`) перечитывает все связанные с Jira открытые задачи и приводит их к состоянию Jira: новое название (если у нас его не переименовали), новые строки → новые пункты, статус строки, изменённый в Jira, → статус пункта. Своё у нас остаётся: статус, который в Jira с прошлого раза не менялся (отмена, «в работе»), и пункты с неотправленными операциями в очереди. Изменения из Jira не публикуют доменных событий и обратно в Jira не уходят. Настройка «Синхронизировать автоматически» (`auto_sync`, по умолчанию выключена) делает то же раз в 5 минут.
+- Таблицы плагина: `jira_links(task_id, issue_key, url, title)`, `jira_items(item_id, issue_key, line_text, jira_status)`, `jira_worklogs(session_id, issue_key, worklog_id, status)`, `jira_queue` (очередь отправки). `title` и `jira_status` — последнее известное состояние Jira (база синхронизации).
 
 ## REST API (v1)
 
@@ -128,7 +129,7 @@ pub trait TaskSource: Plugin {
 
 ## MCP-инструменты (v1)
 
-`get_status`, `open_day`, `close_day`, `list_tasks`, `add_task`, `update_task`, `start_work(item_id)`, `finish_item(next)`, `interrupt`, `start_planning`, `stop`, `start_rest`, `get_day_report(date)`; от плагина Jira — `jira_import(url)`.
+`get_status`, `open_day`, `close_day`, `list_tasks`, `add_task`, `update_task`, `start_work(item_id)`, `finish_item(next)`, `interrupt`, `start_planning`, `stop`, `start_rest`, `get_day_report(date)`; от плагина Jira — `jira_import(url)`, `jira_sync()`, `jira_status()`.
 
 `get_status` всегда возвращает `ends_at` и `events` (что случилось с прошлого вызова: закончилась сессия, ошибки плагинов).
 

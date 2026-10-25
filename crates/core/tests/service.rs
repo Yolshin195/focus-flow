@@ -12,7 +12,7 @@ use focus_api_types::{
 use focus_core::memory::MemoryStore;
 use focus_core::{
     Clock as _, CoreError, CoreResult, DomainEvent, FocusService, ImportedItem, ImportedTask,
-    ManualClock, TaskSources,
+    ManualClock, SourceUpdate, TaskSources,
 };
 use futures_executor::block_on;
 
@@ -453,6 +453,115 @@ fn tasks_tree_crud() {
         .filter(|e| e.name() == "item_completed")
         .count();
     assert_eq!(completed, 1);
+}
+
+#[test]
+fn reopen_publishes_item_reopened_but_cancel_does_not() {
+    let env = Env::new();
+    let parent = env.item("задача");
+    let a = block_on(env.svc.create_task(NewTask::child(parent.id, "a"))).unwrap();
+    let set = |status| {
+        block_on(env.svc.update_task(
+            a.id,
+            TaskPatch {
+                status: Some(status),
+                ..TaskPatch::default()
+            },
+        ))
+        .unwrap()
+    };
+    env.store.outbox.take();
+    set(TaskStatus::Done);
+    set(TaskStatus::Planned);
+    set(TaskStatus::Planned); // уже открыт — без события
+    set(TaskStatus::Done);
+    set(TaskStatus::InProgress);
+    set(TaskStatus::Done);
+    set(TaskStatus::Cancelled); // отмена готового — не «снова открыт»
+    let events = env.store.outbox.take();
+    let names: Vec<_> = events.iter().map(DomainEvent::name).collect();
+    assert_eq!(
+        names,
+        [
+            "item_completed",
+            "item_reopened",
+            "item_completed",
+            "item_reopened",
+            "item_completed"
+        ]
+    );
+    let DomainEvent::ItemReopened { task, parent: p } = &events[1] else {
+        panic!("{events:?}");
+    };
+    assert_eq!(task.status, TaskStatus::Planned);
+    assert_eq!(p.as_ref().map(|p| p.id), Some(parent.id));
+}
+
+#[test]
+fn apply_source_changes_quietly() {
+    let env = Env::new();
+    let parent = env.item("PROJ-1 · старое");
+    let a = block_on(env.svc.create_task(NewTask::child(parent.id, "a"))).unwrap();
+    let b = block_on(env.svc.create_task(NewTask::child(parent.id, "b"))).unwrap();
+    let other = env.item("чужой");
+    env.store.outbox.take();
+    let r = block_on(env.svc.apply_source(
+        parent.id,
+        SourceUpdate {
+            title: Some(" PROJ-1 · новое ".into()),
+            statuses: vec![
+                (a.id, TaskStatus::Done),
+                (b.id, TaskStatus::Planned),  // без изменений
+                (other.id, TaskStatus::Done), // не пункт этой задачи
+            ],
+            new_items: vec![
+                ImportedItem {
+                    title: "c".into(),
+                    status: TaskStatus::Cancelled,
+                },
+                ImportedItem {
+                    title: "a".into(), // такой уже есть
+                    status: TaskStatus::Planned,
+                },
+                ImportedItem {
+                    title: "  ".into(),
+                    status: TaskStatus::Planned,
+                },
+            ],
+        },
+    ))
+    .unwrap();
+    assert!(r.renamed);
+    assert_eq!(r.updated, [a.id]);
+    assert_eq!(r.task.title, "PROJ-1 · новое");
+    let c = r.task.children.iter().find(|c| c.title == "c").unwrap();
+    assert_eq!(r.created, [Some(c.id), None, None]);
+    assert_eq!(c.status, TaskStatus::Cancelled);
+    assert_eq!(c.sort_order, 2);
+    let a2 = r.task.children.iter().find(|c| c.id == a.id).unwrap();
+    assert_eq!(a2.status, TaskStatus::Done);
+    assert!(a2.done_at.is_some());
+    let tree = block_on(env.svc.list_tasks()).unwrap();
+    let o = tree.iter().find(|t| t.id == other.id).unwrap();
+    assert_eq!(o.status, TaskStatus::Planned);
+    // Изменения из источника — без доменных событий.
+    assert!(env.store.outbox.take().is_empty());
+    // Повтор — ничего не меняется.
+    let r = block_on(env.svc.apply_source(
+        parent.id,
+        SourceUpdate {
+            title: Some("PROJ-1 · новое".into()),
+            statuses: vec![(a.id, TaskStatus::Done)],
+            new_items: vec![],
+        },
+    ))
+    .unwrap();
+    assert!(!r.renamed && r.updated.is_empty() && r.created.is_empty());
+    // Только задача верхнего уровня.
+    assert!(matches!(
+        block_on(env.svc.apply_source(a.id, SourceUpdate::default())),
+        Err(CoreError::Validation(_))
+    ));
 }
 
 #[test]

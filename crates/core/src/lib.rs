@@ -19,7 +19,9 @@ pub mod rules;
 mod service;
 
 pub use clock::{Clock, ManualClock, SystemClock};
-pub use domain::{ImportedItem, ImportedTask, Session, Settings, Task, WorkDay};
+pub use domain::{
+    ImportedItem, ImportedTask, Session, Settings, SourceApplied, SourceUpdate, Task, WorkDay,
+};
 pub use error::{CoreError, CoreResult};
 pub use events::DomainEvent;
 pub use outbox::{OutboxEntry, OutboxId, OutboxStats};

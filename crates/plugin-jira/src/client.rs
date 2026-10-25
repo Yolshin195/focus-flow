@@ -79,15 +79,33 @@ pub struct FieldSchema {
     pub kind: Option<String>,
 }
 
+/// Свойство задачи, в котором Smart Checklist (Railsware) хранит чек-лист
+/// текстом. Писать чек-лист — только сюда: поле «Checklists» — его копия,
+/// обычно не на экране редактирования, и `PUT` поля отвечает 400.
+pub const CHECKLIST_PROPERTY: &str = "com.railsware.SmartChecklist.checklist";
+
 /// Задача Jira: название и текст чек-листа.
 #[derive(Debug, Clone)]
 pub struct Issue {
+    /// Числовой id (`259396`); пустой, если Jira его не вернула.
+    pub id: String,
     /// Ключ (`PROJ-1`).
     pub key: String,
     /// Название.
     pub summary: String,
-    /// Текст поля чек-листа (`""`, если поле пустое или не задано).
+    /// Текст чек-листа (`""`, если его нет).
     pub checklist: String,
+}
+
+impl Issue {
+    /// Id для адресов задачи: числовой, а без него — ключ.
+    pub fn id_or_key(&self) -> &str {
+        if self.id.is_empty() {
+            &self.key
+        } else {
+            &self.id
+        }
+    }
 }
 
 /// Клиент Jira (обёртка над общим `reqwest::Client`).
@@ -177,7 +195,12 @@ impl<'a> Jira<'a> {
         self.json(self.req(Method::GET, "/rest/api/2/field")).await
     }
 
-    /// `GET /rest/api/2/issue/{key}?fields=summary,<field>`.
+    /// `GET /rest/api/2/issue/{key}?fields=summary,<field>&properties=<чек-лист>`.
+    ///
+    /// Текст чек-листа — из свойства [`CHECKLIST_PROPERTY`] (его пишет Smart
+    /// Checklist), без него — из поля `field` («Checklists», копия свойства).
+    /// Если Jira не вернула свойства вовсе, а поля нет, свойство читается
+    /// отдельным запросом: перед записью текст должен быть свежим.
     pub async fn issue(&self, key: &str, field: Option<&str>) -> Result<Issue, JiraError> {
         let fields = match field {
             Some(f) => format!("summary,{f}"),
@@ -186,15 +209,19 @@ impl<'a> Jira<'a> {
         let v: Value = self
             .json(
                 self.req(Method::GET, &format!("/rest/api/2/issue/{key}"))
-                    .query(&[("fields", fields)]),
+                    .query(&[
+                        ("fields", fields.as_str()),
+                        ("properties", CHECKLIST_PROPERTY),
+                    ]),
             )
             .await?;
         let f = v.get("fields").cloned().unwrap_or(Value::Null);
-        let checklist = match field {
-            Some(id) => checklist_text(id, f.get(id).cloned().unwrap_or(Value::Null))?,
-            None => String::new(),
-        };
-        Ok(Issue {
+        let mut issue = Issue {
+            id: match v.get("id") {
+                Some(Value::String(s)) => s.clone(),
+                Some(Value::Number(n)) => n.to_string(),
+                _ => String::new(),
+            },
             key: v
                 .get("key")
                 .and_then(Value::as_str)
@@ -205,16 +232,45 @@ impl<'a> Jira<'a> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
-            checklist,
-        })
+            checklist: String::new(),
+        };
+        let props = v.get("properties");
+        issue.checklist = match (props.and_then(|p| p.get(CHECKLIST_PROPERTY)), field) {
+            (Some(Value::String(text)), _) => text.clone(),
+            (_, Some(id)) => checklist_text(id, f.get(id).cloned().unwrap_or(Value::Null))?,
+            (_, None) if props.is_none() => self.checklist_property(issue.id_or_key()).await?,
+            (_, None) => String::new(),
+        };
+        Ok(issue)
     }
 
-    /// `PUT /rest/api/2/issue/{key}` с текстом поля чек-листа целиком.
-    pub async fn put_checklist(&self, key: &str, field: &str, text: &str) -> Result<(), JiraError> {
-        let body = json!({ "fields": { field: text } });
+    /// `GET /rest/api/2/issue/{id}/properties/<чек-лист>`: текст чек-листа;
+    /// свойства нет (404) — чек-листа ещё не было, `""`.
+    pub async fn checklist_property(&self, issue: &str) -> Result<String, JiraError> {
+        let rb = self.req(
+            Method::GET,
+            &format!("/rest/api/2/issue/{issue}/properties/{CHECKLIST_PROPERTY}"),
+        );
+        let v: Value = match self.json(rb).await {
+            Err(JiraError::Client { status: 404, .. }) => return Ok(String::new()),
+            r => r?,
+        };
+        Ok(v.get("value")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned())
+    }
+
+    /// `PUT /rest/api/2/issue/{id}/properties/<чек-лист>` с текстом чек-листа
+    /// целиком (тело — JSON-строка). Smart Checklist сам обновит пункты,
+    /// прогресс и поле «Checklists».
+    pub async fn put_checklist(&self, issue: &str, text: &str) -> Result<(), JiraError> {
         self.send(
-            self.req(Method::PUT, &format!("/rest/api/2/issue/{key}"))
-                .json(&body),
+            self.req(
+                Method::PUT,
+                &format!("/rest/api/2/issue/{issue}/properties/{CHECKLIST_PROPERTY}"),
+            )
+            .json(text),
         )
         .await
         .map(drop)
@@ -258,7 +314,8 @@ pub fn jira_time(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string()
 }
 
-/// Текст чек-листа из значения поля `id`: `null` — пустой чек-лист.
+/// Текст чек-листа из значения поля `id` (когда свойства чек-листа нет):
+/// `null` — пустой чек-лист.
 ///
 /// Не строка — это не то поле: у Smart Checklist для Data Center поле
 /// «Smart Checklist» служит для JQL и отдаёт список объектов

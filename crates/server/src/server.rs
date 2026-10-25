@@ -1,5 +1,5 @@
-//! Запуск: Axum на адресе конфига, таймер, воркер outbox, остановка по
-//! Ctrl+C / SIGTERM.
+//! Запуск: Axum на адресе конфига, таймер, воркер outbox, фоновая работа
+//! плагинов, остановка по Ctrl+C / SIGTERM.
 
 use anyhow::Context as _;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use focus_api_rest::{Access, RestState};
 
 use crate::app::App;
 use crate::config::Config;
-use crate::plugins::{OUTBOX_POLL, run_outbox_worker};
+use crate::plugins::{OUTBOX_POLL, PLUGIN_TICK, run_outbox_worker, run_plugin_ticker};
 use crate::timer::{POLL, run_timer};
 
 /// HTTP-роутер сервиса: REST + SSE (`/api/*`), маршруты плагинов
@@ -68,6 +68,11 @@ pub async fn run_until(
         OUTBOX_POLL,
         cancel.clone(),
     ));
+    let ticker = tokio::spawn(run_plugin_ticker(
+        app.plugins.clone(),
+        PLUGIN_TICK,
+        cancel.clone(),
+    ));
 
     let shutdown = {
         let cancel = cancel.clone();
@@ -88,6 +93,9 @@ pub async fn run_until(
     }
     if let Err(e) = outbox.await {
         tracing::error!(error = %e, "воркер outbox завершился с ошибкой");
+    }
+    if let Err(e) = ticker.await {
+        tracing::error!(error = %e, "фоновая работа плагинов завершилась с ошибкой");
     }
     app.storage.close().await;
     tracing::info!("сервис остановлен");

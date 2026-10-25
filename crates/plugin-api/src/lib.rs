@@ -23,7 +23,9 @@ mod secrets;
 use async_trait::async_trait;
 
 pub use ctx::{PluginCtx, PluginSettings, ServiceSlot};
-pub use focus_core::{CoreError, DomainEvent, FocusService, ImportedItem, ImportedTask};
+pub use focus_core::{
+    CoreError, DomainEvent, FocusService, ImportedItem, ImportedTask, SourceApplied, SourceUpdate,
+};
 pub use mcp::{McpTool, PluginTools, ToolFuture, ToolOutput};
 pub use secrets::Secrets;
 pub use sqlx::migrate::Migrator;
@@ -81,6 +83,15 @@ pub trait Plugin: Send + Sync + 'static {
     /// обработчик должен быть идемпотентным, а «невозможное» событие (плохие
     /// данные, неизвестный тип) — пропускать с `Ok(())`, а не ошибкой.
     async fn on_event(&self, event: &DomainEvent, ctx: &PluginCtx) -> anyhow::Result<()>;
+
+    /// Периодический вызов для фоновой работы (опрос внешней системы):
+    /// сервер зовёт его примерно раз в минуту, пока плагин включён, — по
+    /// одному вызову за раз. Как часто на самом деле что-то делать, решает
+    /// плагин. Ошибка только пишется в лог.
+    async fn tick(&self, ctx: &PluginCtx) -> anyhow::Result<()> {
+        let _ = ctx;
+        Ok(())
+    }
 
     /// HTTP-маршруты плагина; сервер вкладывает их в `/api/plugins/<id>`
     /// (маршрут `/settings` плагина → `/api/plugins/<id>/settings`). Пока

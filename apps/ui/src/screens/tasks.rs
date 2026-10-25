@@ -7,10 +7,11 @@ use focus_api_types::chrono::Utc;
 use focus_api_types::{ActiveSession, ApiError, NewTask, TaskDto, TaskId, TaskStatus};
 
 use super::item_card::ItemCard;
+use super::settings::sync_summary;
 use crate::api::jira_key;
 use crate::components::{Icon, TextArea};
 use crate::fmt;
-use crate::state::{run, use_api, use_app, Command};
+use crate::state::{error_text, refresh_tasks, run, use_api, use_app, Command};
 use crate::Route;
 
 fn is_done(t: &TaskDto) -> bool {
@@ -147,6 +148,29 @@ pub fn Tasks() -> Element {
         _ => None,
     };
     let jira_ready = jira_note.is_none();
+    // «Синхронизировать» — когда Jira подключена и есть открытые задачи из неё.
+    let can_sync = matches!(&*jira.read(), Some(Ok(s)) if s.enabled && s.configured)
+        && tree
+            .iter()
+            .any(|t| !is_done(t) && t.external_url.as_deref().and_then(jira_key).is_some());
+    let mut syncing = use_signal(|| false);
+    // Итог последней синхронизации отсюда: (всё прошло, текст).
+    let mut sync_note = use_signal(|| None::<(bool, String)>);
+    let api_sync = api.clone();
+    let sync = move |_| {
+        let api = api_sync.clone();
+        spawn(async move {
+            syncing.set(true);
+            sync_note.set(None);
+            let note = match api.jira().sync_jira().await {
+                Ok(r) => sync_summary(&r),
+                Err(e) => (false, error_text(&e)),
+            };
+            sync_note.set(Some(note));
+            refresh_tasks(&api, app).await;
+            syncing.set(false);
+        });
+    };
 
     let draft = parse_draft(&text.read());
     let can_submit = match &draft {
@@ -181,17 +205,44 @@ pub fn Tasks() -> Element {
                         "{open_items} {fmt::plural(open_items, \"открытый пункт\", \"открытых пункта\", \"открытых пунктов\")}"
                     }
                 }
-                button {
-                    class: "btn btn-secondary btn-planning-outline",
-                    disabled: busy || !idle,
-                    title: if !idle && !planning { "Сейчас идёт сессия" } else { "" },
-                    onclick: move |_| {
-                        let nav = nav;
-                        run(api_plan.clone(), app, Command::StartPlanning, move || {
-                            nav.push(Route::Focus {});
-                        });
-                    },
-                    if planning { "Планирование идёт" } else { "Начать планирование" }
+                div { class: "page-actions",
+                    if can_sync {
+                        button {
+                            class: "btn btn-secondary",
+                            disabled: syncing(),
+                            title: "Забрать изменения из Jira по всем задачам",
+                            onclick: sync,
+                            {Icon::Sync.render(16)}
+                            if syncing() { "Синхронизация…" } else { "Синхронизировать" }
+                        }
+                    }
+                    button {
+                        class: "btn btn-secondary btn-planning-outline",
+                        disabled: busy || !idle,
+                        title: if !idle && !planning { "Сейчас идёт сессия" } else { "" },
+                        onclick: move |_| {
+                            let nav = nav;
+                            run(api_plan.clone(), app, Command::StartPlanning, move || {
+                                nav.push(Route::Focus {});
+                            });
+                        },
+                        if planning { "Планирование идёт" } else { "Начать планирование" }
+                    }
+                }
+            }
+            if let Some((ok, text)) = sync_note() {
+                div { class: if ok { "sync-note ok" } else { "sync-note err" }, role: if ok { "status" } else { "alert" },
+                    if ok {
+                        {Icon::Check.render(14)}
+                    }
+                    span { "{text}" }
+                    button {
+                        class: "icon-btn",
+                        title: "Скрыть",
+                        "aria-label": "Скрыть итог синхронизации",
+                        onclick: move |_| sync_note.set(None),
+                        {Icon::Close.render(14)}
+                    }
                 }
             }
 

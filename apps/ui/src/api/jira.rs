@@ -1,6 +1,7 @@
 //! Настройки плагина Jira: `GET`/`PUT /api/plugins/jira/settings`,
 //! `POST /api/plugins/jira/test`; очередь отправки: `GET /queue`,
-//! `POST /queue/send`, `DELETE /queue/{id}` (там же, `/api/plugins/jira`).
+//! `POST /queue/send`, `DELETE /queue/{id}`; синхронизация из Jira:
+//! `POST /sync` (там же, `/api/plugins/jira`).
 //!
 //! Это маршруты плагина, а не ядра, поэтому они не входят в `FocusApi`
 //! (контракт `api-types`): отдельный трейт [`JiraSettingsApi`] с реализациями
@@ -73,10 +74,40 @@ pub struct JiraState {
     pub has_token: bool,
     /// Отправлять очередь сразу (иначе — кнопкой).
     pub auto_send: bool,
+    /// Забирать изменения из Jira сами (иначе — кнопкой).
+    pub auto_sync: bool,
+    /// Как часто идёт автосинхронизация, мин (0 — сервис не сказал).
+    pub sync_every_min: u64,
+    /// Итог последней синхронизации (с запуска сервиса).
+    pub last_sync: Option<JiraSyncResult>,
     /// Сколько операций ждут отправки.
     pub queue_pending: u64,
     /// Последняя ошибка обращения к Jira.
     pub last_error: Option<String>,
+}
+
+/// Итог синхронизации из Jira: ответ `POST /sync`, `last_sync` в настройках.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default)]
+pub struct JiraSyncResult {
+    /// Когда закончилась.
+    pub at: Option<DateTime<Utc>>,
+    /// Задач проверено.
+    pub tasks: u64,
+    /// Задач, в которых что-то изменилось.
+    pub changed: u64,
+    /// Задач с новым названием.
+    pub renamed: u64,
+    /// Новых пунктов.
+    pub added_items: u64,
+    /// Пунктов с новым статусом.
+    pub updated_items: u64,
+    /// Пунктов, изменённых в Jira, но с неотправленными изменениями у нас.
+    pub kept_local: u64,
+    /// Задач, которые не удалось получить.
+    pub failed: u64,
+    /// Первая ошибка.
+    pub error: Option<String>,
 }
 
 /// Правка настроек (`PUT`): переданные поля заменяются, пустая строка
@@ -95,6 +126,8 @@ pub struct JiraPatch {
     pub worklog: JiraWorklog,
     /// Отправлять очередь сразу.
     pub auto_send: bool,
+    /// Синхронизировать из Jira сами.
+    pub auto_sync: bool,
     /// Новый токен; не передаётся, если `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
@@ -120,6 +153,8 @@ pub enum JiraOpKind {
     ChecklistAdd,
     /// Отметить строку `+ текст`.
     ChecklistDone,
+    /// Снять отметку: `+ текст` → `- текст`.
+    ChecklistUndone,
     /// Записать worklog.
     Worklog,
     /// Вид из более новой версии сервиса.
@@ -183,10 +218,13 @@ pub trait JiraSettingsApi {
     async fn send_jira_queue(&self) -> ApiResult<JiraQueue>;
     /// Не отправлять операцию `id`.
     async fn drop_jira_op(&self, id: i64) -> ApiResult<JiraQueue>;
+    /// Забрать изменения из Jira по всем задачам сейчас.
+    async fn sync_jira(&self) -> ApiResult<JiraSyncResult>;
 }
 
 /// Мок настроек Jira для демо и тестов: всё в памяти, проверка «подключается»,
-/// если плагин настроен, отправка очереди всегда проходит.
+/// если плагин настроен, отправка очереди всегда проходит, синхронизация
+/// находит задачи без изменений (задачи мока `MockApi` — отдельно).
 #[derive(Debug, Default)]
 pub struct MockJira {
     state: RefCell<JiraState>,
@@ -220,6 +258,7 @@ impl MockJira {
                 base_url: Some("https://jira.example.com".into()),
                 has_token: true,
                 checklist_field_resolved: Some("customfield_10100".into()),
+                sync_every_min: 5,
                 ..JiraState::default()
             }),
             queue: RefCell::new(vec![
@@ -307,6 +346,7 @@ impl JiraSettingsApi for MockJira {
                 .or_else(|| s.base_url.as_ref().map(|_| "customfield_10100".into()));
             s.worklog = patch.worklog;
             s.auto_send = patch.auto_send;
+            s.auto_sync = patch.auto_sync;
             if let Some(t) = patch.token {
                 s.has_token = !t.trim().is_empty();
             }
@@ -347,6 +387,19 @@ impl JiraSettingsApi for MockJira {
         self.queue.borrow_mut().retain(|op| op.id != id);
         self.recompute();
         Ok(self.queue_now())
+    }
+
+    async fn sync_jira(&self) -> ApiResult<JiraSyncResult> {
+        if let Some(why) = self.state.borrow().problem.clone() {
+            return Err(ApiError::Validation(format!("Jira не настроена: {why}")));
+        }
+        let r = JiraSyncResult {
+            at: Some(Utc::now()),
+            tasks: 2,
+            ..JiraSyncResult::default()
+        };
+        self.state.borrow_mut().last_sync = Some(r.clone());
+        Ok(r)
     }
 }
 
@@ -434,6 +487,35 @@ mod tests {
         assert_eq!(q.items[0].seconds, Some(1200));
         assert_eq!(q.items[1].kind, JiraOpKind::Unknown);
         assert_eq!(q.sent, Some(0));
+    }
+
+    #[test]
+    fn sync_parses_plugin_json() {
+        let json = r#"{"at":"2026-10-25T09:00:00Z","tasks":3,"changed":1,"renamed":0,
+            "added_items":2,"updated_items":1,"kept_local":1,"failed":1,"error":"ABC-9: 404"}"#;
+        let r: JiraSyncResult = serde_json::from_str(json).unwrap();
+        assert_eq!((r.tasks, r.added_items, r.kept_local), (3, 2, 1));
+        assert_eq!(r.error.as_deref(), Some("ABC-9: 404"));
+        let s: JiraState = serde_json::from_str(
+            r#"{"auto_sync":true,"sync_every_min":5,"last_sync":{"tasks":1}}"#,
+        )
+        .unwrap();
+        assert!(s.auto_sync);
+        assert_eq!(s.last_sync.unwrap().tasks, 1);
+        let p = JiraPatch {
+            auto_sync: true,
+            ..JiraPatch::default()
+        };
+        assert_eq!(serde_json::to_value(&p).unwrap()["auto_sync"], true);
+    }
+
+    #[test]
+    fn mock_sync() {
+        assert!(block_on(MockJira::unconfigured().sync_jira()).is_err());
+        let m = MockJira::demo();
+        let r = block_on(m.sync_jira()).unwrap();
+        assert!(r.at.is_some() && r.error.is_none());
+        assert_eq!(block_on(m.jira_settings()).unwrap().last_sync, Some(r));
     }
 
     #[test]

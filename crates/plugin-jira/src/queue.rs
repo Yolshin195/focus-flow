@@ -1,6 +1,8 @@
 //! Очередь отправки в Jira (`jira_queue`): операции, которые плагин
 //! собирается выполнить. Обработчики событий только кладут сюда записи
 //! (без сети); отправка — [`crate::JiraPlugin::flush`] по порядку id.
+//! Новая строка и worklog — не больше одной записи на пункт/сессию;
+//! отметки пункта — сколько угодно, но ждёт не больше одной.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -14,6 +16,8 @@ pub enum OpKind {
     ChecklistAdd,
     /// Отметить строку `+ текст`.
     ChecklistDone,
+    /// Снять отметку: `+ текст` → `- текст`.
+    ChecklistUndone,
     /// Записать worklog.
     Worklog,
 }
@@ -23,14 +27,21 @@ impl OpKind {
         match self {
             Self::ChecklistAdd => "checklist_add",
             Self::ChecklistDone => "checklist_done",
+            Self::ChecklistUndone => "checklist_undone",
             Self::Worklog => "worklog",
         }
+    }
+
+    /// Отметка или снятие отметки пункта.
+    pub fn is_mark(self) -> bool {
+        matches!(self, Self::ChecklistDone | Self::ChecklistUndone)
     }
 
     fn parse(s: &str) -> Option<Self> {
         match s {
             "checklist_add" => Some(Self::ChecklistAdd),
             "checklist_done" => Some(Self::ChecklistDone),
+            "checklist_undone" => Some(Self::ChecklistUndone),
             "worklog" => Some(Self::Worklog),
             _ => None,
         }
@@ -76,8 +87,72 @@ pub struct Op {
     pub last_error_at: Option<DateTime<Utc>>,
 }
 
-/// Положить операцию; повтор (тот же вид и пункт/сессия) — ничего, даже
-/// если запись отправлена или удалена.
+/// Что стало с отметкой пункта в очереди.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mark {
+    /// Добавлена.
+    Added,
+    /// Такая уже ждёт отправки.
+    Same,
+    /// Ждала обратная (отметили и сняли до отправки) — убрана, в Jira
+    /// ничего не уйдёт.
+    Cancelled,
+}
+
+/// Положить отметку или снятие отметки пункта (`op.kind.is_mark()`). Ждёт
+/// обратная — обе взаимно гасятся; такая же — ничего. Отметки одного пункта
+/// повторяются (отметили, сняли, отметили), поэтому уникальности у них нет.
+pub(crate) async fn push_mark(pool: &SqlitePool, op: &NewOp) -> sqlx::Result<Mark> {
+    let mut tx = pool.begin().await?;
+    let last: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, kind FROM jira_queue
+         WHERE ref_id = ? AND status = 'pending' AND kind IN ('checklist_done', 'checklist_undone')
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(&op.ref_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let mark = match last {
+        Some((_, kind)) if kind == op.kind.as_str() => Mark::Same,
+        Some((id, _)) => {
+            sqlx::query("DELETE FROM jira_queue WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            Mark::Cancelled
+        }
+        None => {
+            sqlx::query(
+                "INSERT INTO jira_queue (kind, ref_id, issue_key, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(op.kind.as_str())
+            .bind(&op.ref_id)
+            .bind(&op.issue_key)
+            .bind(&op.text)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&mut *tx)
+            .await?;
+            Mark::Added
+        }
+    };
+    tx.commit().await?;
+    Ok(mark)
+}
+
+/// Ждут ли отправки операции с пунктом `item` (новая строка или отметка):
+/// тогда его состояние у нас новее, чем в Jira.
+pub(crate) async fn has_pending(pool: &SqlitePool, item: &str) -> sqlx::Result<bool> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM jira_queue WHERE ref_id = ? AND status = 'pending' AND kind != 'worklog'",
+    )
+    .bind(item)
+    .fetch_one(pool)
+    .await?;
+    Ok(n > 0)
+}
+
+/// Положить новую строку или worklog; повтор (тот же вид и пункт/сессия) —
+/// ничего, даже если запись отправлена или удалена.
 pub(crate) async fn push(pool: &SqlitePool, op: &NewOp) -> sqlx::Result<bool> {
     let (started, secs) = match op.worklog {
         Some((at, s)) => (Some(at.to_rfc3339()), Some(s)),

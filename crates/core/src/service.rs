@@ -17,7 +17,7 @@ use focus_api_types::{
 };
 use futures_util::lock::Mutex;
 
-use crate::domain::{Session, Settings, Task, WorkDay};
+use crate::domain::{Session, Settings, SourceApplied, SourceUpdate, Task, WorkDay};
 use crate::error::{CoreError, CoreResult};
 use crate::events::DomainEvent;
 use crate::ports::Ports;
@@ -479,7 +479,7 @@ impl FocusService {
     }
 
     /// `PATCH /api/tasks/{id}`: частичная правка. Переход в `done` публикует
-    /// `ItemCompleted`.
+    /// `ItemCompleted`, из `done` в открытый статус — `ItemReopened`.
     pub async fn update_task(&self, id: TaskId, patch: TaskPatch) -> CoreResult<TaskDto> {
         let (_g, now) = self.begin().await?;
         let mut task = self.p.tasks.get(id).await?.ok_or(CoreError::ItemNotFound)?;
@@ -498,23 +498,26 @@ impl FocusService {
         if let Some(order) = patch.sort_order {
             task.sort_order = order;
         }
+        let was_done = task.status == TaskStatus::Done;
         let became_done = match patch.status {
             Some(status) => task.set_status(status, now),
             None => false,
         };
+        let reopened =
+            was_done && matches!(task.status, TaskStatus::Planned | TaskStatus::InProgress);
         self.p.tasks.save(&task).await?;
-        if became_done {
+        if became_done || reopened {
             let parent = match task.parent_id {
                 Some(p) => self.p.tasks.get(p).await?,
                 None => None,
             };
-            self.p
-                .events
-                .publish(&[DomainEvent::ItemCompleted {
-                    task: task.clone(),
-                    parent,
-                }])
-                .await?;
+            let task = task.clone();
+            let ev = if became_done {
+                DomainEvent::ItemCompleted { task, parent }
+            } else {
+                DomainEvent::ItemReopened { task, parent }
+            };
+            self.p.events.publish(&[ev]).await?;
         }
         self.subtree(id).await
     }
@@ -753,6 +756,82 @@ impl FocusService {
             created,
             added_items: added,
             task: self.subtree(task.id).await?,
+        })
+    }
+
+    /// Синхронизация с источником: применить к задаче верхнего уровня её
+    /// свежее состояние — название, статусы пунктов, новые пункты. Что
+    /// менять, решает плагин-источник. Доменных событий нет, как и у пунктов
+    /// импорта: изменения пришли из источника, отправлять их обратно не нужно.
+    pub async fn apply_source(
+        &self,
+        id: TaskId,
+        update: SourceUpdate,
+    ) -> CoreResult<SourceApplied> {
+        let (_g, now) = self.begin().await?;
+        let mut task = self.p.tasks.get(id).await?.ok_or(CoreError::ItemNotFound)?;
+        if task.parent_id.is_some() {
+            return Err(CoreError::Validation(
+                "синхронизация с источником — только у задачи верхнего уровня".into(),
+            ));
+        }
+        let mut renamed = false;
+        if let Some(title) = &update.title {
+            let title = clean_title(title)?;
+            if title != task.title {
+                task.title = title;
+                self.p.tasks.save(&task).await?;
+                renamed = true;
+            }
+        }
+        let children = self.p.tasks.children(Some(id)).await?;
+        let mut updated = Vec::new();
+        for (cid, status) in &update.statuses {
+            let Some(mut child) = children.iter().find(|c| c.id == *cid).cloned() else {
+                continue;
+            };
+            if child.status == *status {
+                continue;
+            }
+            child.set_status(*status, now);
+            self.p.tasks.save(&child).await?;
+            updated.push(child.id);
+        }
+        let mut titles: Vec<String> = children.into_iter().map(|c| c.title).collect();
+        let mut order = self.next_sort_order(Some(id)).await?;
+        let mut created = Vec::with_capacity(update.new_items.len());
+        for item in &update.new_items {
+            let title = match clean_title(&item.title) {
+                Ok(t) if !titles.contains(&t) => t,
+                _ => {
+                    created.push(None);
+                    continue;
+                }
+            };
+            let mut child = Task {
+                id: TaskId::from(Uuid::now_v7()),
+                parent_id: Some(id),
+                title: title.clone(),
+                notes: None,
+                status: TaskStatus::Planned,
+                planned_for: None,
+                estimate_intervals: None,
+                sort_order: order,
+                created_at: now,
+                done_at: None,
+                external_url: None,
+            };
+            child.set_status(item.status, now);
+            self.p.tasks.save(&child).await?;
+            order += 1;
+            titles.push(title);
+            created.push(Some(child.id));
+        }
+        Ok(SourceApplied {
+            renamed,
+            updated,
+            created,
+            task: self.subtree(id).await?,
         })
     }
 

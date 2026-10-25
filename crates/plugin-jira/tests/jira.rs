@@ -1,7 +1,8 @@
 //! Плагин Jira против заглушки `wiremock`: автопоиск поля, импорт,
-//! добавление и завершение пунктов (с перечитыванием поля), worklog,
-//! авторизация Data Center/Cloud, ненастроенный плагин, маршруты, очередь
-//! отправки (ручная и автоматическая).
+//! добавление, отметка и снятие отметки пунктов (запись в свойство задачи
+//! Smart Checklist с перечитыванием), worklog, авторизация Data
+//! Center/Cloud, ненастроенный плагин, маршруты, очередь отправки (ручная и
+//! автоматическая), синхронизация из Jira (ручная и автоматическая).
 
 use std::sync::Arc;
 
@@ -11,7 +12,7 @@ use chrono::{Duration, TimeZone, Utc};
 use focus_api_types::{NewTask, SessionId, SessionKind, TaskPatch, TaskStatus};
 use focus_core::{ManualClock, Session};
 use focus_plugin_api::{DomainEvent, Plugin, PluginCtx, TaskSource as _};
-use focus_plugin_jira::JiraPlugin;
+use focus_plugin_jira::{CHECKLIST_PROPERTY, JiraPlugin};
 use focus_server::{App, Config, Registration, router};
 use focus_storage::Storage;
 use http_body_util::BodyExt as _;
@@ -22,6 +23,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TOKEN: &str = "t";
 const FIELD: &str = "customfield_10100";
+/// Числовой id задачи ABC-1: адрес свойства чек-листа — по нему.
+const ISSUE_ID: &str = "10001";
 const SAMPLE: &str = "- Вердикт в PDF и в чате считается по разным правилам\n- (1) Название отчёта по тестированию — с временем\n+ (30) Пароль не выводить в историю\n~ (31) Останавливать прогон при сбое\nx Одна задача за запуск\n## Заметки\n- Подключить роутер llm ноду";
 
 struct Env {
@@ -105,23 +108,94 @@ impl Env {
         )
     }
 
+    /// Задача, как её отдаёт Jira Data Center: свойство чек-листа (запрошено
+    /// `properties=`) и его копия в поле «Checklists».
     async fn mount_issue(&self, key: &str, checklist: &str) {
+        self.mount_issue_as(key, "Отчёт по тестированию", checklist)
+            .await;
+    }
+
+    async fn mount_issue_as(&self, key: &str, summary: &str, checklist: &str) {
         Mock::given(method("GET"))
             .and(path(format!("/rest/api/2/issue/{key}")))
+            .and(query_param("properties", CHECKLIST_PROPERTY))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": ISSUE_ID,
                 "key": key,
-                "fields": {"summary": "Отчёт по тестированию", FIELD: checklist}
+                "fields": {"summary": summary, FIELD: checklist},
+                "properties": {CHECKLIST_PROPERTY: checklist},
             })))
             .mount(&self.jira)
             .await;
     }
 
-    async fn mount_put(&self, key: &str) {
+    /// Запись чек-листа: свойство задачи — 200; поле задачи — 400, как на
+    /// живой Jira, где «Checklists» нет на экране редактирования.
+    async fn mount_put(&self, _key: &str) {
         Mock::given(method("PUT"))
-            .and(path(format!("/rest/api/2/issue/{key}")))
-            .respond_with(ResponseTemplate::new(204))
+            .and(path(prop_path()))
+            .respond_with(ResponseTemplate::new(200))
             .mount(&self.jira)
             .await;
+        Mock::given(method("PUT"))
+            .and(path("/rest/api/2/issue/ABC-1"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "errorMessages": [],
+                "errors": {FIELD: "Field 'customfield_10100' cannot be set. It is not on the appropriate screen, or unknown."}
+            })))
+            .mount(&self.jira)
+            .await;
+    }
+
+    /// Тексты, записанные в свойство чек-листа, по порядку.
+    async fn puts(&self) -> Vec<String> {
+        self.requests("PUT", &prop_path())
+            .await
+            .iter()
+            .map(put_text)
+            .collect()
+    }
+
+    fn item(&self, r: &focus_api_types::ImportResult, prefix: &str) -> focus_api_types::TaskDto {
+        r.task
+            .children
+            .iter()
+            .find(|c| c.title.starts_with(prefix))
+            .unwrap()
+            .clone()
+    }
+
+    async fn set_status(&self, id: focus_api_types::TaskId, status: TaskStatus) {
+        self.app
+            .service
+            .update_task(
+                id,
+                TaskPatch {
+                    status: Some(status),
+                    ..TaskPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn children(&self, task: focus_api_types::TaskId) -> Vec<(String, TaskStatus)> {
+        let tree = self.app.service.list_tasks().await.unwrap();
+        let t = tree.iter().find(|t| t.id == task).unwrap();
+        t.children
+            .iter()
+            .map(|c| (c.title.clone(), c.status))
+            .collect()
+    }
+
+    async fn queue_kinds(&self) -> Vec<String> {
+        let (_, q) = self.http("GET", "/api/plugins/jira/queue", None).await;
+        q["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["kind"].as_str().unwrap().to_owned())
+            .collect()
     }
 
     async fn requests(&self, m: &str, p: &str) -> Vec<wiremock::Request> {
@@ -159,9 +233,14 @@ impl Env {
     }
 }
 
+fn prop_path() -> String {
+    format!("/rest/api/2/issue/{ISSUE_ID}/properties/{CHECKLIST_PROPERTY}")
+}
+
+/// Тело записи свойства — JSON-строка с текстом чек-листа.
 fn put_text(r: &wiremock::Request) -> String {
     let v: Value = serde_json::from_slice(&r.body).unwrap();
-    v["fields"][FIELD].as_str().unwrap().to_owned()
+    v.as_str().unwrap().to_owned()
 }
 
 #[tokio::test]
@@ -437,9 +516,13 @@ async fn new_item_appends_line() {
         .await
         .unwrap();
     assert_eq!(e.deliver().await, 1);
-    let puts = e.requests("PUT", "/rest/api/2/issue/ABC-1").await;
-    assert_eq!(puts.len(), 1);
-    assert_eq!(put_text(&puts[0]), format!("{SAMPLE}\n- Новый пункт"));
+    assert_eq!(e.puts().await, [format!("{SAMPLE}\n- Новый пункт")]);
+    // Поле задачи не пишется (на живой Jira это 400).
+    assert!(
+        e.requests("PUT", "/rest/api/2/issue/ABC-1")
+            .await
+            .is_empty()
+    );
     let n: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM jira_items WHERE line_text = 'Новый пункт' AND issue_key = 'ABC-1'",
     )
@@ -490,10 +573,8 @@ async fn completed_item_rereads_and_keeps_remote_edits() {
         .await
         .unwrap();
     assert_eq!(e.deliver().await, 1);
-    let puts = e.requests("PUT", "/rest/api/2/issue/ABC-1").await;
-    assert_eq!(puts.len(), 1);
     let want = remote.replace("- (1) Название отчёта", "+ (1) Название отчёта");
-    assert_eq!(put_text(&puts[0]), want);
+    assert_eq!(e.puts().await, [want]);
 
     // Строку удалили в Jira — предупреждение и пропуск, без повторов.
     e.jira.reset().await;
@@ -517,11 +598,7 @@ async fn completed_item_rereads_and_keeps_remote_edits() {
         .await
         .unwrap();
     assert_eq!(e.deliver().await, 1);
-    assert!(
-        e.requests("PUT", "/rest/api/2/issue/ABC-1")
-            .await
-            .is_empty()
-    );
+    assert!(e.puts().await.is_empty());
     let st = e.app.service.plugin_status().await.unwrap();
     assert!(st[0].healthy && st[0].outbox_pending == 0, "{st:?}");
 }
@@ -764,7 +841,7 @@ async fn manual_queue_send_and_drop() {
     assert_eq!(q["sent"], 2, "{q}");
     assert!(q["error"].is_null());
     assert!(q["items"].as_array().unwrap().is_empty());
-    assert_eq!(e.requests("PUT", "/rest/api/2/issue/ABC-1").await.len(), 2);
+    assert_eq!(e.puts().await.len(), 2);
     assert!(
         e.requests("POST", "/rest/api/2/issue/ABC-1/worklog")
             .await
@@ -777,6 +854,10 @@ async fn queue_send_needs_configuration() {
     let e = env().await;
     let (code, v) = e.http("POST", "/api/plugins/jira/queue/send", None).await;
     assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    let (code, v) = e.http("POST", "/api/plugins/jira/sync", None).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    // Без настройки автосинхронизация молчит.
+    e.plugin.tick(&e.ctx()).await.unwrap();
     let (code, v) = e.http("GET", "/api/plugins/jira/queue", None).await;
     assert_eq!(code, StatusCode::OK);
     assert_eq!(v["items"], json!([]));
@@ -804,4 +885,334 @@ async fn mcp_tools() {
     assert_eq!(out.data["created"], true);
     assert_eq!(out.data["added_items"], 6);
     assert!(tool("jira_import").call(json!({})).await.is_err());
+    e.app.plugins.deliver_due().await.unwrap();
+    let out = tool("jira_sync").call(Value::Null).await.unwrap();
+    assert_eq!(out.data["tasks"], 1);
+    assert!(
+        out.summary.contains("изменений в Jira нет"),
+        "{}",
+        out.summary
+    );
+}
+
+/// Сняли отметку — строка снова `- текст`; отметили снова — `+ текст`.
+/// База (`jira_status`) следует за тем, что записано в Jira.
+#[tokio::test]
+async fn reopened_item_unchecks_line() {
+    let e = env().await;
+    let r = e.imported().await;
+    let item = e.item(&r, "(30)");
+    assert_eq!(item.status, TaskStatus::Done);
+    e.mount_issue("ABC-1", SAMPLE).await;
+    e.mount_put("ABC-1").await;
+    e.set_status(item.id, TaskStatus::Planned).await;
+    assert_eq!(e.deliver().await, 1);
+    let unchecked = SAMPLE.replace("+ (30)", "- (30)");
+    assert_eq!(e.puts().await, std::slice::from_ref(&unchecked));
+    let base = |e: &Env| {
+        let pool = e.app.storage.pool().clone();
+        let id = item.id.to_string();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT jira_status FROM jira_items WHERE item_id = ?",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(base(&e).await.as_deref(), Some("planned"));
+
+    e.jira.reset().await;
+    e.mount_issue("ABC-1", &unchecked).await;
+    e.mount_put("ABC-1").await;
+    e.set_status(item.id, TaskStatus::Done).await;
+    assert_eq!(e.deliver().await, 1);
+    assert_eq!(e.puts().await, [SAMPLE.to_owned()]);
+    assert_eq!(base(&e).await.as_deref(), Some("done"));
+
+    // Строку в Jira уже открыли (`~`) — снятие отметки ничего не пишет.
+    e.jira.reset().await;
+    e.mount_issue("ABC-1", &SAMPLE.replace("+ (30)", "~ (30)"))
+        .await;
+    e.mount_put("ABC-1").await;
+    e.set_status(item.id, TaskStatus::InProgress).await;
+    e.deliver().await;
+    assert!(e.puts().await.is_empty());
+    assert_eq!(base(&e).await.as_deref(), Some("in_progress"));
+    let st = e.app.service.plugin_status().await.unwrap();
+    assert!(st[0].healthy && st[0].outbox_pending == 0, "{st:?}");
+}
+
+/// Отметили и сняли до отправки — в очереди ничего; отметки одного пункта
+/// повторяются, но ждёт не больше одной. Новая строка — одна, сколько бы раз
+/// ни пришло событие.
+#[tokio::test]
+async fn check_and_uncheck_before_send_cancel_out() {
+    let e = env().await;
+    let r = e.imported_with(json!({})).await;
+    let one = e.item(&r, "(1)");
+    let done30 = e.item(&r, "(30)");
+    e.set_status(one.id, TaskStatus::Done).await;
+    e.set_status(one.id, TaskStatus::Planned).await;
+    e.deliver().await;
+    assert!(e.queue_kinds().await.is_empty());
+
+    e.set_status(one.id, TaskStatus::Done).await;
+    e.set_status(one.id, TaskStatus::Planned).await;
+    e.set_status(one.id, TaskStatus::Done).await;
+    e.set_status(done30.id, TaskStatus::Planned).await;
+    let new = e
+        .app
+        .service
+        .create_task(NewTask::child(r.task.id, "Новый пункт"))
+        .await
+        .unwrap();
+    e.deliver().await;
+    // Повтор события «пункт создан» (retry outbox) не дублирует строку.
+    let tree = e.app.service.list_tasks().await.unwrap();
+    let parent = tree.iter().find(|t| t.id == r.task.id).unwrap();
+    let to_task = |d: &focus_api_types::TaskDto| focus_core::Task {
+        id: d.id,
+        parent_id: d.parent_id,
+        title: d.title.clone(),
+        notes: d.notes.clone(),
+        status: d.status,
+        planned_for: d.planned_for,
+        estimate_intervals: d.estimate_intervals,
+        sort_order: d.sort_order,
+        created_at: d.created_at,
+        done_at: d.done_at,
+        external_url: d.external_url.clone(),
+    };
+    let created = DomainEvent::ItemCreated {
+        task: to_task(&new),
+        parent: Some(to_task(parent)),
+    };
+    e.plugin.on_event(&created, &e.ctx()).await.unwrap();
+    assert_eq!(
+        e.queue_kinds().await,
+        ["checklist_done", "checklist_undone", "checklist_add"]
+    );
+
+    e.mount_issue("ABC-1", SAMPLE).await;
+    e.mount_put("ABC-1").await;
+    let (_, q) = e.http("POST", "/api/plugins/jira/queue/send", None).await;
+    assert_eq!(q["sent"], 3, "{q}");
+    // Каждая запись перечитывает чек-лист (здесь он не меняется).
+    assert_eq!(
+        e.puts().await,
+        [
+            SAMPLE.replace("- (1)", "+ (1)"),
+            SAMPLE.replace("+ (30)", "- (30)"),
+            format!("{SAMPLE}\n- Новый пункт"),
+        ]
+    );
+    // После отправки отметка того же пункта снова ставится в очередь.
+    e.set_status(one.id, TaskStatus::Planned).await;
+    e.deliver().await;
+    assert_eq!(e.queue_kinds().await, ["checklist_undone"]);
+}
+
+/// Поля «Checklists» нет, и Jira не вернула свойства в ответе на задачу —
+/// чек-лист читается отдельным запросом свойства; нет свойства (404) —
+/// чек-лист пуст, первая строка создаёт его.
+#[tokio::test]
+async fn checklist_property_without_field() {
+    let e = env().await;
+    e.configure(json!({"auto_send": true})).await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/field"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"id": "summary", "name": "Summary", "schema": {"type": "string"}},
+        ])))
+        .expect(1)
+        .mount(&e.jira)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/issue/ABC-1"))
+        .and(query_param("fields", "summary"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": ISSUE_ID, "key": "ABC-1", "fields": {"summary": "Без поля"}
+        })))
+        .mount(&e.jira)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(prop_path()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"key": CHECKLIST_PROPERTY, "value": SAMPLE})),
+        )
+        .mount(&e.jira)
+        .await;
+    let r = e.app.service.import("ABC-1").await.unwrap();
+    assert_eq!(r.task.children.len(), 6);
+    assert_eq!(r.task.title, "ABC-1 · Без поля");
+    e.deliver().await;
+
+    e.mount_put("ABC-1").await;
+    e.app
+        .service
+        .create_task(NewTask::child(r.task.id, "Новый пункт"))
+        .await
+        .unwrap();
+    e.deliver().await;
+    assert_eq!(e.puts().await, [format!("{SAMPLE}\n- Новый пункт")]);
+
+    // Свойства ещё нет — чек-лист пуст.
+    e.jira.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/issue/ABC-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "10002", "key": "ABC-2", "fields": {"summary": "Пустая"}
+        })))
+        .mount(&e.jira)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/rest/api/2/issue/10002/properties/{CHECKLIST_PROPERTY}"
+        )))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "errorMessages": ["The property with key 'com.railsware.SmartChecklist.checklist' does not exist."]
+        })))
+        .mount(&e.jira)
+        .await;
+    let r = e.app.service.import("ABC-2").await.unwrap();
+    assert!(r.created && r.task.children.is_empty());
+}
+
+/// «Синхронизировать»: изменения в Jira приходят к нам, свои изменения у
+/// нас (отмена, «в работе», неотправленная отметка, переименование) остаются.
+#[tokio::test]
+async fn sync_pulls_changes_from_jira() {
+    let e = env().await;
+    let r = e.imported_with(json!({})).await;
+    let one = e.item(&r, "(1)");
+    let router = e.item(&r, "Подключить");
+    // У нас: отменили пункт (в Jira не уходит) и отметили «(1)» (ждёт отправки).
+    e.set_status(router.id, TaskStatus::Cancelled).await;
+    e.set_status(one.id, TaskStatus::Done).await;
+    e.deliver().await;
+    assert_eq!(e.queue_kinds().await, ["checklist_done"]);
+
+    // В Jira: «Вердикт» готов, «(1)» пропущен, «Одна задача» снова открыта,
+    // две новые строки, новое название.
+    let remote = SAMPLE
+        .replace("- Вердикт", "+ Вердикт")
+        .replace("- (1)", "x (1)")
+        .replace("x Одна задача", "- Одна задача")
+        + "\n- **Строка** из Jira\n+ Готовая из Jira";
+    e.mount_issue_as("ABC-1", "Отчёт по тестированию v2", &remote)
+        .await;
+    let (code, s) = e.http("POST", "/api/plugins/jira/sync", None).await;
+    assert_eq!(code, StatusCode::OK, "{s}");
+    assert_eq!(s["tasks"], 1, "{s}");
+    assert_eq!(s["changed"], 1);
+    assert_eq!(s["renamed"], 1);
+    assert_eq!(s["added_items"], 2);
+    assert_eq!(s["updated_items"], 2);
+    assert_eq!(s["kept_local"], 1);
+    assert!(s["error"].is_null());
+    let got = e.children(r.task.id).await;
+    let st = |t: &str| got.iter().find(|(x, _)| x.starts_with(t)).unwrap().1;
+    assert_eq!(st("Вердикт"), TaskStatus::Done);
+    assert_eq!(st("(1)"), TaskStatus::Done); // наше новее — ждёт отправки
+    assert_eq!(st("(30)"), TaskStatus::Done);
+    assert_eq!(st("(31)"), TaskStatus::InProgress);
+    assert_eq!(st("Одна задача"), TaskStatus::Planned);
+    assert_eq!(st("Подключить"), TaskStatus::Cancelled); // отмена у нас
+    assert_eq!(st("Строка из Jira"), TaskStatus::Planned);
+    assert_eq!(st("Готовая из Jira"), TaskStatus::Done);
+    assert_eq!(got.len(), 8);
+    let tree = e.app.service.list_tasks().await.unwrap();
+    assert_eq!(tree[0].title, "ABC-1 · Отчёт по тестированию v2");
+    // Изменения из Jira не возвращаются в Jira.
+    assert_eq!(e.deliver().await, 0);
+    assert_eq!(e.queue_kinds().await, ["checklist_done"]);
+    assert!(e.puts().await.is_empty());
+    let (_, v) = e.http("GET", "/api/plugins/jira/settings", None).await;
+    assert_eq!(v["last_sync"]["added_items"], 2, "{v}");
+    assert_eq!(v["auto_sync"], false);
+
+    // Повтор без изменений в Jira — ничего не меняется.
+    let (_, s) = e.http("POST", "/api/plugins/jira/sync", None).await;
+    assert_eq!(s["changed"], 0, "{s}");
+    assert_eq!(s["kept_local"], 0, "{s}");
+    assert_eq!(e.children(r.task.id).await, got);
+
+    // Переименовали у нас — новое название из Jira не затирает его.
+    e.app
+        .service
+        .update_task(
+            r.task.id,
+            TaskPatch {
+                title: Some("Моё название".into()),
+                ..TaskPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+    e.jira.reset().await;
+    e.mount_issue_as("ABC-1", "Отчёт v3", &remote).await;
+    let (_, s) = e.http("POST", "/api/plugins/jira/sync", None).await;
+    assert_eq!(s["renamed"], 0, "{s}");
+    let tree = e.app.service.list_tasks().await.unwrap();
+    assert_eq!(tree[0].title, "Моё название");
+}
+
+/// Закрытые задачи не синхронизируются; задача, которой нет в Jira, — ошибка
+/// в итоге, остальные проходят.
+#[tokio::test]
+async fn sync_reports_missing_and_skips_closed() {
+    let e = env().await;
+    let r = e.imported_with(json!({})).await;
+    e.mount_issue("ABC-2", "- a").await;
+    let r2 = e.app.service.import("ABC-2").await.unwrap();
+    e.deliver().await;
+    e.mount_issue("ABC-3", "- b").await;
+    let r3 = e.app.service.import("ABC-3").await.unwrap();
+    e.deliver().await;
+    e.set_status(r2.task.id, TaskStatus::Done).await;
+    e.jira.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/2/issue/ABC-1"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "errorMessages": ["Issue Does Not Exist"]
+        })))
+        .mount(&e.jira)
+        .await;
+    e.mount_issue("ABC-3", "- b\n- c").await;
+    let (code, s) = e.http("POST", "/api/plugins/jira/sync", None).await;
+    assert_eq!(code, StatusCode::OK, "{s}");
+    assert_eq!(s["tasks"], 2, "{s}");
+    assert_eq!(s["failed"], 1);
+    assert_eq!(s["added_items"], 1);
+    assert!(s["error"].as_str().unwrap().contains("ABC-1"), "{s}");
+    assert!(
+        e.requests("GET", "/rest/api/2/issue/ABC-2")
+            .await
+            .is_empty()
+    );
+    assert_eq!(e.children(r3.task.id).await.len(), 2);
+    assert_eq!(e.children(r.task.id).await.len(), 6);
+}
+
+/// Автосинхронизация — из `tick`: выключена — без сети; включена — сразу,
+/// затем не чаще раза в `SYNC_EVERY`.
+#[tokio::test]
+async fn auto_sync_runs_from_tick() {
+    let e = env().await;
+    let r = e.imported_with(json!({})).await;
+    e.mount_issue("ABC-1", &format!("{SAMPLE}\n- Новая")).await;
+    e.plugin.tick(&e.ctx()).await.unwrap();
+    assert!(e.jira.received_requests().await.unwrap().is_empty());
+
+    let v = e.configure(json!({"auto_sync": true})).await;
+    assert_eq!(v["auto_sync"], true);
+    e.plugin.tick(&e.ctx()).await.unwrap();
+    assert_eq!(e.children(r.task.id).await.len(), 7);
+    let n = e.jira.received_requests().await.unwrap().len();
+    e.plugin.tick(&e.ctx()).await.unwrap();
+    assert_eq!(e.jira.received_requests().await.unwrap().len(), n);
 }

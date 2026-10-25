@@ -5,7 +5,8 @@
 //! - `POST /test` — проверить подключение: `GET /rest/api/2/myself`;
 //! - `GET /queue` — очередь отправки: `{auto_send, items: [Op]}`;
 //! - `POST /queue/send` — отправить её сейчас: то же + `sent`, `error`;
-//! - `DELETE /queue/{id}` — не отправлять запись (повтор события её не вернёт).
+//! - `DELETE /queue/{id}` — не отправлять запись (повтор события её не вернёт);
+//! - `POST /sync` — забрать изменения из Jira сейчас: [`SyncResult`](crate::SyncResult).
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -49,6 +50,7 @@ pub(crate) fn router(plugin: JiraPlugin, ctx: PluginCtx) -> Router {
         .route("/queue", get(get_queue))
         .route("/queue/send", post(send_queue))
         .route("/queue/{id}", delete(drop_queued))
+        .route("/sync", post(sync))
         .with_state((plugin, ctx))
 }
 
@@ -57,7 +59,7 @@ async fn get_settings(State((p, ctx)): State<St>) -> Res {
 }
 
 const STRING_KEYS: [&str; 3] = ["base_url", "email", "checklist_field_id"];
-const VALUE_KEYS: [&str; 4] = ["mode", "worklog", "enabled", "auto_send"];
+const VALUE_KEYS: [&str; 5] = ["mode", "worklog", "enabled", "auto_send", "auto_sync"];
 
 async fn put_settings(State((p, ctx)): State<St>, body: axum::body::Bytes) -> Res {
     let bad = |m: String| RouteError(ApiError::Validation(m));
@@ -140,6 +142,17 @@ async fn send_queue(State((p, ctx)): State<St>) -> Res {
     v["sent"] = json!(r.sent);
     v["error"] = json!(r.error);
     Ok(Json(v))
+}
+
+async fn sync(State((p, ctx)): State<St>) -> Res {
+    let (_, conn) = p.conn(&ctx).await?;
+    if let Err(why) = conn {
+        return Err(RouteError(ApiError::Validation(format!(
+            "Jira не настроена: {why}"
+        ))));
+    }
+    let r = p.sync(&ctx).await?;
+    Ok(Json(serde_json::to_value(r).map_err(anyhow::Error::from)?))
 }
 
 async fn drop_queued(State((p, ctx)): State<St>, Path(id): Path<i64>) -> Res {

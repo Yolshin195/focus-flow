@@ -37,6 +37,8 @@ pub enum Icon {
     More,
     /// Заметка — лист с строками.
     Note,
+    /// Синхронизация — две стрелки по кругу.
+    Sync,
 }
 
 #[component]
@@ -89,6 +91,14 @@ impl Icon {
             },
             Icon::Minus => rsx! {
                 Svg { size, path { d: "M4.5 10h11" } }
+            },
+            Icon::Sync => rsx! {
+                Svg { size,
+                    path { d: "M15.6 8.2A6 6 0 0 0 4.9 6" }
+                    path { d: "M4.5 3.5V6.5h3" }
+                    path { d: "M4.4 11.8A6 6 0 0 0 15.1 14" }
+                    path { d: "M15.5 16.5v-3h-3" }
+                }
             },
             Icon::Search => rsx! {
                 Svg { size,

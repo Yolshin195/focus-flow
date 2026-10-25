@@ -9,8 +9,8 @@ use std::rc::Rc;
 pub use focus_api_types::FocusApi;
 pub use http::HttpApi;
 pub use jira::{
-    JiraMode, JiraOp, JiraOpKind, JiraPatch, JiraQueue, JiraSettingsApi, JiraState, JiraTestResult,
-    JiraWorklog, MockJira,
+    JiraMode, JiraOp, JiraOpKind, JiraPatch, JiraQueue, JiraSettingsApi, JiraState, JiraSyncResult,
+    JiraTestResult, JiraWorklog, MockJira,
 };
 pub use mock::{jira_key, MockApi, MockScenario};
 

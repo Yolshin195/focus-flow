@@ -1,11 +1,13 @@
 //! Плагин Jira: импорт задачи и строк Smart Checklist как пунктов,
-//! синхронизация пунктов (новый пункт → строка `- текст`, пункт готов →
-//! `+ текст`) и worklog по закрытым сессиям работы.
+//! отправка изменений пунктов (новый пункт → строка `- текст`, пункт готов →
+//! `+ текст`, отметку сняли → `- текст`), worklog по закрытым сессиям работы
+//! и синхронизация из Jira (название, новые строки, статусы строк).
 //!
 //! - Настройки — `SettingsDto.plugins["jira"]` ([`JiraSettings`]), токен —
 //!   в секретах плагина (никогда в настройках и логах).
-//! - Маршруты: `GET`/`PUT /api/plugins/jira/settings`, `POST /api/plugins/jira/test`.
-//! - MCP: `jira_import(url)`, `jira_status()`.
+//! - Маршруты: `GET`/`PUT /api/plugins/jira/settings`, `POST /api/plugins/jira/test`,
+//!   очередь отправки и `POST /api/plugins/jira/sync` (см. `routes`).
+//! - MCP: `jira_import(url)`, `jira_sync()`, `jira_status()`.
 //! - Включён по умолчанию, но без настройки безвреден: события
 //!   пропускаются без сети, статус — «не настроен».
 
@@ -14,6 +16,7 @@ mod client;
 mod queue;
 mod routes;
 mod settings;
+mod sync;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -21,7 +24,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use focus_api_types::{EndReason, ServerEvent, SessionKind, TaskDto, TaskId};
+use focus_api_types::{EndReason, ServerEvent, SessionKind, TaskDto, TaskId, TaskStatus};
 use focus_core::{Session, Task};
 use focus_plugin_api::{
     CoreError, DomainEvent, ImportedTask, McpTool, Migrator, Plugin, PluginCtx, TaskSource,
@@ -34,11 +37,12 @@ use crate::queue::NewOp;
 
 pub use checklist::{Line, Marker};
 pub use client::{
-    Field, FieldSchema, Issue, Jira, JiraError, checklist_text, jira_time, pick_checklist_field,
-    worklog_body,
+    CHECKLIST_PROPERTY, Field, FieldSchema, Issue, Jira, JiraError, checklist_text, jira_time,
+    pick_checklist_field, worklog_body,
 };
 pub use queue::{Op, OpKind};
 pub use settings::{Conn, JiraSettings, Mode, TOKEN_SECRET, WorklogSettings, validate_base_url};
+pub use sync::{SYNC_EVERY, SyncResult};
 
 /// Id плагина.
 pub const ID: &str = "jira";
@@ -58,16 +62,21 @@ struct Inner {
     http: reqwest::Client,
     /// Последние настройки (для [`TaskSource::matches`] без БД).
     settings: RwLock<JiraSettings>,
-    /// Найденный автопоиском id поля чек-листа: (base_url, id).
-    field: Mutex<Option<(String, String)>>,
+    /// Итог автопоиска поля чек-листа: (base_url, id или «поля нет»).
+    field: Mutex<Option<(String, Option<String>)>>,
     /// Контекст от сервера (для MCP-инструментов).
     ctx: OnceLock<PluginCtx>,
     /// Последняя ошибка обращения к Jira (сбрасывается успехом).
     last_error: Mutex<Option<String>>,
     /// «Не настроен» уже записано в лог (до следующей смены настроек).
     unconfigured_logged: AtomicBool,
-    /// Отправка очереди — по одной за раз (кнопка и автоотправка).
+    /// Отправка очереди — по одной за раз (кнопка и автоотправка); под ним
+    /// же меняются отметки в очереди, чтобы не убрать отправляемую запись.
     flush: tokio::sync::Mutex<()>,
+    /// Синхронизация из Jira — по одной за раз (кнопка и автосинхронизация).
+    sync: tokio::sync::Mutex<()>,
+    /// Итог последней синхронизации.
+    last_sync: Mutex<Option<SyncResult>>,
 }
 
 /// Итог отправки очереди.
@@ -102,6 +111,8 @@ impl JiraPlugin {
                 last_error: Mutex::default(),
                 unconfigured_logged: AtomicBool::new(false),
                 flush: tokio::sync::Mutex::new(()),
+                sync: tokio::sync::Mutex::new(()),
+                last_sync: Mutex::default(),
             }),
         }
     }
@@ -127,39 +138,40 @@ impl JiraPlugin {
         Ok((s, c))
     }
 
-    /// Id поля чек-листа: из настроек, из кэша или автопоиском
-    /// (`GET /rest/api/2/field`). `None` — поля нет.
-    async fn field(
-        &self,
-        s: &JiraSettings,
-        jira: &Jira<'_>,
-        conn: &Conn,
-    ) -> Result<Option<String>, JiraError> {
+    /// Id поля чек-листа «Checklists»: из настроек, из кэша или автопоиском
+    /// (`GET /rest/api/2/field`). Поле нужно только для чтения, когда Jira не
+    /// отдаёт свойство чек-листа, поэтому его отсутствие и ошибка автопоиска
+    /// не мешают: `None`.
+    async fn field(&self, s: &JiraSettings, jira: &Jira<'_>, conn: &Conn) -> Option<String> {
         if let Some(id) = s
             .checklist_field_id
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            return Ok(Some(id.to_owned()));
+            return Some(id.to_owned());
         }
         if let Some((base, id)) = lock(&self.inner.field).clone()
             && base == conn.base
         {
-            return Ok(Some(id));
+            return id;
         }
-        let fields = jira.fields().await?;
+        let fields = match jira.fields().await {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, "не удалось получить поля Jira — чек-лист читается из свойства задачи");
+                return None;
+            }
+        };
         let found = pick_checklist_field(&fields).map(|f| f.id.clone());
         match &found {
-            Some(id) => {
-                tracing::info!(field = %id, "найдено поле чек-листа Jira");
-                *lock(&self.inner.field) = Some((conn.base.clone(), id.clone()));
-            }
-            None => tracing::warn!(
-                "в Jira нет текстового поля чек-листа («Checklists» Smart Checklist) — задайте checklist_field_id"
+            Some(id) => tracing::info!(field = %id, "найдено поле чек-листа Jira"),
+            None => tracing::info!(
+                "в Jira нет текстового поля «Checklists» — чек-лист читается из свойства задачи"
             ),
         }
-        Ok(found)
+        *lock(&self.inner.field) = Some((conn.base.clone(), found.clone()));
+        found
     }
 
     fn note<T>(&self, r: Result<T, JiraError>) -> Result<T, JiraError> {
@@ -209,8 +221,12 @@ impl JiraPlugin {
     /// повторит его позже (запись в очереди та же, без дублей).
     async fn handle(&self, ev: &DomainEvent, ctx: &PluginCtx) -> anyhow::Result<()> {
         match ev {
-            DomainEvent::TaskImported { source, task, .. } if source == ID => {
-                return self.on_imported(ctx, task).await;
+            DomainEvent::TaskImported {
+                source,
+                task,
+                created,
+            } if source == ID => {
+                return self.on_imported(ctx, task, *created).await;
             }
             DomainEvent::ItemCreated {
                 task,
@@ -224,6 +240,13 @@ impl JiraPlugin {
                 parent: Some(parent),
             } => {
                 self.enqueue_item(ctx, OpKind::ChecklistDone, task, parent)
+                    .await?
+            }
+            DomainEvent::ItemReopened {
+                task,
+                parent: Some(parent),
+            } => {
+                self.enqueue_item(ctx, OpKind::ChecklistUndone, task, parent)
                     .await?
             }
             DomainEvent::SessionClosed {
@@ -246,21 +269,30 @@ impl JiraPlugin {
         Ok(())
     }
 
-    /// Импорт: запомнить связь и строки пунктов (без сети).
-    async fn on_imported(&self, ctx: &PluginCtx, task: &Task) -> anyhow::Result<()> {
+    /// Импорт: запомнить связь, название (новой задачи — оно из Jira) и
+    /// строки пунктов с их статусом в Jira (без сети).
+    async fn on_imported(&self, ctx: &PluginCtx, task: &Task, created: bool) -> anyhow::Result<()> {
         let s = self.load(ctx).await?;
         let Some(key) = self.issue_of(ctx, task, &s).await? else {
             return Ok(());
         };
+        if created {
+            sqlx::query("UPDATE jira_links SET title = COALESCE(title, ?) WHERE task_id = ?")
+                .bind(&task.title)
+                .bind(task.id.to_string())
+                .execute(ctx.pool())
+                .await?;
+        }
         let tree = ctx.service()?.list_tasks().await?;
         if let Some(t) = find_task(&tree, task.id) {
             for c in &t.children {
                 sqlx::query(
-                    "INSERT OR IGNORE INTO jira_items (item_id, issue_key, line_text) VALUES (?, ?, ?)",
+                    "INSERT OR IGNORE INTO jira_items (item_id, issue_key, line_text, jira_status) VALUES (?, ?, ?, ?)",
                 )
                 .bind(c.id.to_string())
                 .bind(&key)
                 .bind(&c.title)
+                .bind(status_str(c.status))
                 .execute(ctx.pool())
                 .await?;
             }
@@ -295,7 +327,18 @@ impl JiraPlugin {
             text: item.title.clone(),
             worklog: None,
         };
-        if queue::push(ctx.pool(), &op).await? {
+        if kind.is_mark() {
+            let _one = self.inner.flush.lock().await;
+            match queue::push_mark(ctx.pool(), &op).await? {
+                queue::Mark::Added => {
+                    tracing::info!(issue = %op.issue_key, item = %item.title, kind = ?kind, "в очереди Jira");
+                }
+                queue::Mark::Cancelled => {
+                    tracing::info!(issue = %op.issue_key, item = %item.title, "отметка и снятие отметки погасили друг друга");
+                }
+                queue::Mark::Same => {}
+            }
+        } else if queue::push(ctx.pool(), &op).await? {
             tracing::info!(issue = %op.issue_key, item = %item.title, kind = ?kind, "в очереди Jira");
         }
         Ok(())
@@ -407,41 +450,49 @@ impl JiraPlugin {
                 if item_line(ctx, &op.ref_id).await?.is_some() {
                     return Ok(()); // уже отправлен
                 }
-                let field = self.checklist_field(s, jira, conn).await?;
-                let issue = self.note(jira.issue(key, Some(&field)).await)?;
+                let field = self.field(s, jira, conn).await;
+                let issue = self.note(jira.issue(key, field.as_deref()).await)?;
                 // Строка уже есть (её добавили в Jira или прошлая попытка
                 // успела записать) — только запоминаем.
-                if checklist::find_line(&issue.checklist, &op.text).is_none() {
-                    let text = checklist::append(&issue.checklist, &op.text);
-                    self.note(jira.put_checklist(key, &field, &text).await)?;
-                    tracing::info!(issue = %key, item = %op.text, "пункт добавлен в чек-лист Jira");
-                }
-                sqlx::query(
-                    "INSERT OR REPLACE INTO jira_items (item_id, issue_key, line_text) VALUES (?, ?, ?)",
-                )
-                .bind(&op.ref_id)
-                .bind(key)
-                .bind(op.text.trim())
-                .execute(ctx.pool())
-                .await?;
+                let status = match checklist::find_line(&issue.checklist, &op.text) {
+                    Some(idx) => checklist::status_at(&issue.checklist, idx),
+                    None => {
+                        let text = checklist::append(&issue.checklist, &op.text);
+                        self.note(jira.put_checklist(issue.id_or_key(), &text).await)?;
+                        tracing::info!(issue = %key, item = %op.text, "пункт добавлен в чек-лист Jira");
+                        Some(TaskStatus::Planned)
+                    }
+                };
+                remember_line(ctx, &op.ref_id, key, op.text.trim(), status).await?;
             }
-            OpKind::ChecklistDone => {
-                let field = self.checklist_field(s, jira, conn).await?;
+            OpKind::ChecklistDone | OpKind::ChecklistUndone => {
+                let done = op.kind == OpKind::ChecklistDone;
+                let field = self.field(s, jira, conn).await;
                 let text = item_line(ctx, &op.ref_id)
                     .await?
                     .unwrap_or_else(|| op.text.clone());
-                // Перечитать поле перед записью: строки могли поменять в Jira.
-                let issue = self.note(jira.issue(key, Some(&field)).await)?;
+                // Перечитать чек-лист перед записью: строки могли поменять в Jira.
+                let issue = self.note(jira.issue(key, field.as_deref()).await)?;
                 let idx = checklist::find_line(&issue.checklist, &text)
                     .or_else(|| checklist::find_line(&issue.checklist, &op.text));
                 let Some(idx) = idx else {
                     tracing::warn!(issue = %key, item = %op.text, "строка пункта не найдена в чек-листе Jira — пропущено");
                     return Ok(());
                 };
-                if let Some(new) = checklist::set_done(&issue.checklist, idx) {
-                    self.note(jira.put_checklist(key, &field, &new).await)?;
-                    tracing::info!(issue = %key, item = %op.text, "пункт отмечен в Jira");
-                }
+                let changed = if done {
+                    checklist::set_done(&issue.checklist, idx)
+                } else {
+                    checklist::set_todo(&issue.checklist, idx)
+                };
+                let status = match changed {
+                    Some(new) => {
+                        self.note(jira.put_checklist(issue.id_or_key(), &new).await)?;
+                        tracing::info!(issue = %key, item = %op.text, done, "отметка пункта записана в Jira");
+                        checklist::status_at(&new, idx)
+                    }
+                    None => checklist::status_at(&issue.checklist, idx),
+                };
+                set_line_status(ctx, &op.ref_id, status).await?;
             }
             OpKind::Worklog => {
                 if worklog_sent(ctx, &op.ref_id).await? {
@@ -465,20 +516,6 @@ impl JiraPlugin {
         Ok(())
     }
 
-    /// Поле чек-листа; нет его — ошибка операции (видна в очереди).
-    async fn checklist_field(
-        &self,
-        s: &JiraSettings,
-        jira: &Jira<'_>,
-        conn: &Conn,
-    ) -> anyhow::Result<String> {
-        self.note(self.field(s, jira, conn).await)?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "в Jira нет текстового поля чек-листа «Checklists» — укажите его id в настройках"
-            )
-        })
-    }
-
     /// Очередь для `GET /queue`.
     pub(crate) async fn queue_json(&self, ctx: &PluginCtx) -> anyhow::Result<Value> {
         let s = self.load(ctx).await?;
@@ -496,7 +533,7 @@ impl JiraPlugin {
             CoreError::Validation(format!("«{url}» — не ссылка на задачу Jira и не ключ"))
         })?;
         let jira = Jira::new(&self.inner.http, &conn);
-        let field = self.note(self.field(&s, &jira, &conn).await)?;
+        let field = self.field(&s, &jira, &conn).await;
         let issue = match jira.issue(&key, field.as_deref()).await {
             Err(JiraError::Client { status: 404, .. }) => {
                 return Err(
@@ -509,11 +546,7 @@ impl JiraPlugin {
         Ok(ImportedTask {
             source: ID.to_owned(),
             url: format!("{}/browse/{}", conn.base, issue.key),
-            title: if summary.is_empty() {
-                issue.key.clone()
-            } else {
-                format!("{} · {summary}", issue.key)
-            },
+            title: import_title(&issue.key, summary),
             notes: None,
             items: checklist::items(&issue.checklist),
         })
@@ -532,7 +565,7 @@ impl JiraPlugin {
             lock(&self.inner.field)
                 .as_ref()
                 .filter(|(b, _)| Some(b) == s.base().as_ref())
-                .map(|(_, id)| id.clone())
+                .and_then(|(_, id)| id.clone())
         });
         Ok(json!({
             "enabled": ctx.settings().enabled().await?,
@@ -546,6 +579,9 @@ impl JiraPlugin {
             "worklog": s.worklog,
             "has_token": has_token,
             "auto_send": s.auto_send,
+            "auto_sync": s.auto_sync,
+            "sync_every_min": SYNC_EVERY.as_secs() / 60,
+            "last_sync": lock(&self.inner.last_sync).clone(),
             "queue_pending": queue::pending_count(ctx.pool()).await?,
             "last_error": lock(&self.inner.last_error).clone(),
         }))
@@ -618,6 +654,10 @@ impl Plugin for JiraPlugin {
         self.handle(event, ctx).await
     }
 
+    async fn tick(&self, ctx: &PluginCtx) -> anyhow::Result<()> {
+        self.auto_sync(ctx).await
+    }
+
     fn routes(&self, ctx: PluginCtx) -> Option<axum::Router> {
         Some(routes::router(self.clone(), ctx))
     }
@@ -664,6 +704,22 @@ impl Plugin for JiraPlugin {
             },
         );
         let p = self.clone();
+        let sync = McpTool::new(
+            "jira_sync",
+            "Синхронизировать задачи с Jira: перечитать все связанные открытые задачи и \
+             обновить у себя название, новые строки Smart Checklist и статусы строк, которые \
+             поменяли в Jira. Неотправленные изменения пунктов у нас не трогаются.",
+            json!({"type": "object", "properties": {}, "additionalProperties": false}),
+            move |_| {
+                let p = p.clone();
+                async move {
+                    let ctx = p.ctx()?;
+                    let r = p.sync(&ctx).await?;
+                    ToolOutput::new(r.summary(), &r)
+                }
+            },
+        );
+        let p = self.clone();
         let status = McpTool::new(
             "jira_status",
             "Состояние плагина Jira: настроен ли, base_url, режим, есть ли токен, поле чек-листа, \
@@ -689,7 +745,7 @@ impl Plugin for JiraPlugin {
                 }
             },
         );
-        vec![import, status]
+        vec![import, sync, status]
     }
 }
 
@@ -744,10 +800,79 @@ pub fn key_from_input(input: &str, host: Option<&str>) -> Option<String> {
 }
 
 async fn link(ctx: &PluginCtx, task: TaskId, key: &str, url: &str) -> anyhow::Result<()> {
-    sqlx::query("INSERT OR REPLACE INTO jira_links (task_id, issue_key, url) VALUES (?, ?, ?)")
-        .bind(task.to_string())
-        .bind(key)
-        .bind(url)
+    sqlx::query(
+        "INSERT INTO jira_links (task_id, issue_key, url) VALUES (?, ?, ?)
+         ON CONFLICT (task_id) DO UPDATE SET issue_key = excluded.issue_key, url = excluded.url",
+    )
+    .bind(task.to_string())
+    .bind(key)
+    .bind(url)
+    .execute(ctx.pool())
+    .await?;
+    Ok(())
+}
+
+/// Название задачи при импорте: «KEY · summary» (без summary — ключ).
+pub(crate) fn import_title(key: &str, summary: &str) -> String {
+    let summary = summary.trim();
+    if summary.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{key} · {summary}")
+    }
+}
+
+/// Статус в `jira_items.jira_status`.
+pub(crate) fn status_str(s: TaskStatus) -> &'static str {
+    match s {
+        TaskStatus::Planned => "planned",
+        TaskStatus::InProgress => "in_progress",
+        TaskStatus::Done => "done",
+        TaskStatus::Cancelled => "cancelled",
+    }
+}
+
+pub(crate) fn parse_status(s: &str) -> Option<TaskStatus> {
+    match s {
+        "planned" => Some(TaskStatus::Planned),
+        "in_progress" => Some(TaskStatus::InProgress),
+        "done" => Some(TaskStatus::Done),
+        "cancelled" => Some(TaskStatus::Cancelled),
+        _ => None,
+    }
+}
+
+/// Запомнить строку пункта и её статус в Jira (`None` — не знаем).
+pub(crate) async fn remember_line(
+    ctx: &PluginCtx,
+    item: &str,
+    key: &str,
+    line: &str,
+    status: Option<TaskStatus>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO jira_items (item_id, issue_key, line_text, jira_status) VALUES (?, ?, ?, ?)
+         ON CONFLICT (item_id) DO UPDATE SET issue_key = excluded.issue_key,
+             line_text = excluded.line_text, jira_status = excluded.jira_status",
+    )
+    .bind(item)
+    .bind(key)
+    .bind(line)
+    .bind(status.map(status_str))
+    .execute(ctx.pool())
+    .await?;
+    Ok(())
+}
+
+/// Статус строки пункта в Jira после записи (строки нет в `jira_items` — ничего).
+async fn set_line_status(
+    ctx: &PluginCtx,
+    item: &str,
+    status: Option<TaskStatus>,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE jira_items SET jira_status = ? WHERE item_id = ?")
+        .bind(status.map(status_str))
+        .bind(item)
         .execute(ctx.pool())
         .await?;
     Ok(())
